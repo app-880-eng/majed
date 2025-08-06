@@ -57,7 +57,7 @@ def analyze(symbol):
         send_telegram(f"🚀 فرصة شراء {symbol} | السعر: {price:.6f} | RSI: {rsi_val:.2f} | MACD: {macd_hist:.4f}")
     else:
         print(f"❌ No signal for {symbol}")
-    else:
+    if else:
         print(f"{symbol} no signal. price={price:.6f} rsi={rsi_val:.2f} macdH={macd_hist:.4f}")
 
 def main():
