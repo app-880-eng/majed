@@ -36,20 +36,27 @@ def get_crypto_data(symbol):
         return pd.DataFrame()
 
 def analyze(symbol):
+    print(f"Fetching data for {symbol}...")
     df = get_crypto_data(symbol)
+
     if df.empty or len(df) < 35:
-        print(f"No/low data for {symbol}")
+        print(f"⚠️ No or low data for {symbol}")
         return
+
     try:
         rsi_val = RSIIndicator(df['close'], window=14).rsi().iloc[-1]
         macd_hist = MACD(df['close']).macd_diff().iloc[-1]
         price = float(df['close'].iloc[-1])
+        print(f"{symbol} => Price: {price}, RSI: {rsi_val}, MACD: {macd_hist}")
     except Exception as e:
-        print(f"Indicators error {symbol}: {e}")
+        print(f"Indicators error for {symbol}: {e}")
         return
 
     if rsi_val < 30 and macd_hist > 0:
+        print(f"✅ Signal found for {symbol}")
         send_telegram(f"🚀 فرصة شراء {symbol} | السعر: {price:.6f} | RSI: {rsi_val:.2f} | MACD: {macd_hist:.4f}")
+    else:
+        print(f"❌ No signal for {symbol}")
     else:
         print(f"{symbol} no signal. price={price:.6f} rsi={rsi_val:.2f} macdH={macd_hist:.4f}")
 
