@@ -54,12 +54,18 @@ def analyze(symbol):
         print(f"{symbol} no signal. price={price:.6f} rsi={rsi_val:.2f} macdH={macd_hist:.4f}")
 
 def main():
+    print("🚀 Starting bot on Render...")
     send_telegram("✅ البوت تم تشغيله على Render بنجاح.")
+
     coins = ["BTC", "ETH", "XRP", "ADA", "DOGE", "TRX", "SHIB"]
+
     while True:
+        print("🔍 Checking coins...")
         for c in coins:
+            print(f"📊 Now analyzing: {c}")
             analyze(c)
-            time.sleep(2)
+        time.sleep(2)
+        print("⏳ Waiting 60 seconds before next cycle...")
         time.sleep(60)
 
 if __name__ == "__main__":
