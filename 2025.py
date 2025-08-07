@@ -16,7 +16,7 @@ def send_telegram(text: str):
     except Exception as e:
         print(f"[Telegram Error] {e}")
 
-# ================= BINANCE SECTION =================
+# ============ Binance ============
 
 def get_binance_data(symbol, interval='1h', limit=100):
     url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}"
@@ -61,11 +61,27 @@ def analyze_binance(symbol):
         print(f"[Binance Error] {symbol} – {e}")
 
 def get_binance_pairs():
-    url = "https://api.binance.com/api/v3/ticker/price"
-    data = requests.get(url).json()
-    return [item['symbol'] for item in data if item['symbol'].endswith("USDT") and float(item['price']) < 10]
+    try:
+        url = "https://api.binance.com/api/v3/ticker/price"
+        response = requests.get(url, timeout=10)
+        data = response.json()
+        pairs = []
+        for item in data:
+            symbol = item.get('symbol')
+            price_str = item.get('price')
+            if symbol and price_str:
+                try:
+                    price = float(price_str)
+                    if symbol.endswith("USDT") and price < 10:
+                        pairs.append(symbol)
+                except ValueError:
+                    continue
+        return pairs
+    except Exception as e:
+        print(f"[Binance Pair Fetch Error] {e}")
+        return []
 
-# ================= PUMP.FUN SECTION =================
+# ============ Pump.fun ============
 
 def fetch_pumpfun_data():
     try:
@@ -78,14 +94,12 @@ def fetch_pumpfun_data():
 
 def analyze_pumpfun(coin):
     try:
-        name = coin['name']
         symbol = coin['symbol']
         liquidity = float(coin['liquidity'] / 1e9)
         buys = coin['buyCount']
         price = float(coin['price'] / 1e9)
         url = f"https://pump.fun/{coin['id']}"
 
-        # شروط الدخول
         if liquidity >= 5 and buys >= 20:
             message = (
                 f"🚀 *توصية من Pump.fun (Solana)*\n\n"
@@ -100,7 +114,7 @@ def analyze_pumpfun(coin):
     except Exception as e:
         print(f"[Pump.fun Analyze Error] {e}")
 
-# ================= MAIN =================
+# ============ Main Bot ============
 
 def run_bot():
     sent_binance = set()
@@ -109,14 +123,12 @@ def run_bot():
     while True:
         print("🔄 بدء الفحص...")
 
-        # Binance
         for symbol in get_binance_pairs():
             if symbol not in sent_binance:
                 analyze_binance(symbol)
                 sent_binance.add(symbol)
                 time.sleep(1)
 
-        # Pump.fun
         coins = fetch_pumpfun_data()
         for coin in coins:
             coin_id = coin['id']
@@ -128,7 +140,6 @@ def run_bot():
         print("✅ تم الانتهاء من الفحص. الانتظار 10 دقائق...")
         time.sleep(600)
 
-# ✅ هذا هو المكان الصحيح لإرسال رسالة "تم التشغيل"
 if __name__ == "__main__":
     send_telegram("✅ تم تشغيل بوت التداول الاحترافي (Binance + Pump.fun)، بانتظار الفرص 🔍")
     run_bot()
