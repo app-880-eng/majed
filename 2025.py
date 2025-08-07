@@ -65,7 +65,7 @@ def analyze(symbol: str):
         log(f"Indicators error {symbol}: {e}")
         return
 
-    if rsi_val < 30 and macd_hist > 0:
+    if rsi_val < 70 and macd_hist > -1:
         log(f"✅ Signal found for {symbol}")
         send_telegram(
             f"🚀 فرصة شراء {symbol}\n"
