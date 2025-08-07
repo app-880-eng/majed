@@ -1,5 +1,3 @@
 requests
 pandas
 ta
-beautifulsoup4
-feedparser
