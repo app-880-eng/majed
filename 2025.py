@@ -3,12 +3,12 @@ import requests
 import pandas as pd
 from ta.momentum import RSIIndicator
 from ta.trend import MACD
+import random
 
 # ====== إعدادات التليجرام ======
-TOKEN = "8295831234:AAHgdvWal7E_5_hsjPmbPiIEra4LBDRjbgU"  # ضع التوكن هنا
-CHAT_ID = "1820224574"  # ضع الـ ID هنا
+TOKEN = "8295831234:AAHgdvWal7E_5_hsjPmbPiIEra4LBDRjbgU"
+CHAT_ID = "1820224574"
 
-# طباعة فورية للّوج
 def log(msg: str):
     print(msg, flush=True)
 
@@ -60,41 +60,21 @@ def analyze(symbol: str):
         rsi_val = RSIIndicator(df["close"], window=14).rsi().iloc[-1]
         macd_hist = MACD(df["close"]).macd_diff().iloc[-1]
         price = float(df["close"].iloc[-1])
-        log(f"{symbol} => price={price}, RSI={rsi_val:.2f}, MACD_H={macd_hist:.4f}")
+        log(f"{symbol} [{time.strftime('%H:%M:%S')}] => السعر: {price}, RSI={rsi_val:.2f}, MACD_H={macd_hist:.4f}")
     except Exception as e:
         log(f"Indicators error {symbol}: {e}")
         return
 
-    if rsi_val < 70 and macd_hist > -1:
-        log(f"✅ Signal found for {symbol}")
+    if rsi_val < 50 and macd_hist > -0.5:
+        log(f"✅ توصية متاحة لـ {symbol}")
         send_telegram(
             f"🚀 فرصة شراء {symbol}\n"
             f"السعر: {price}\nRSI: {rsi_val:.2f}\nMACD: {macd_hist:.4f}"
         )
     else:
-        log(f"❌ No signal for {symbol}")
+        log(f"❌ لا توجد توصية لـ {symbol} (RSI={rsi_val:.2f}, MACD={macd_hist:.4f})")
 
-# ====== التشغيل ======
-def main():
-    log("🚀 Starting bot on Render...")
-    send_telegram("✅ تم تشغيل البوت على Render")
-
-    coins = ["BTC", "ETH", "XRP", "ADA", "DOGE", "TRX", "SHIB", "BCH", "BUN"]
-
-    while True:
-        log("🔍 Checking coins...")
-        for c in coins:
-            analyze(c)
-            time.sleep(2)
-        log("⏳ Waiting 60 seconds before next check...")
-        time.sleep(60)
-
-if __name__ == "__main__":
-    main()
-    
-    import random
-
-# توصيات وهمية عشوائية
+# ====== توصية عشوائية مرة واحدة ======
 sample_signals = [
     "🚀 توصية شراء: عملة $PEPE عند سعر 0.00000123. الهدف 10%",
     "📉 توصية بيع: عملة $DOGE الآن بسبب إشارات ضعف في الزخم",
@@ -102,10 +82,28 @@ sample_signals = [
     "💡 تنبيه: عملة $SHIB تظهر فرص دخول قوية بعد تصحيح"
 ]
 
-# إرسال توصية عشوائية لتأكيد التحليل
-def send_random_test_signal():
+def send_random_test_signal_once():
     signal = random.choice(sample_signals)
+    log("📤 إرسال توصية عشوائية للاختبار...")
     send_telegram(signal)
 
-# شغّل التوصية عند بداية تشغيل البوت
-send_random_test_signal()
+# ====== التشغيل ======
+def main():
+    log("🚀 بدء تشغيل البوت...")
+    send_telegram("✅ تم تشغيل البوت على Render")
+    
+    # إرسال توصية عشوائية مرة واحدة
+    send_random_test_signal_once()
+
+    coins = ["BTC", "ETH", "XRP", "ADA", "DOGE", "TRX", "SHIB", "BCH", "BUN"]
+
+    while True:
+        log("🔍 جاري تحليل العملات...")
+        for c in coins:
+            analyze(c)
+            time.sleep(2)
+        log("⏳ انتظار 60 ثانية قبل الجولة التالية...\n")
+        time.sleep(60)
+
+if __name__ == "__main__":
+    main()
