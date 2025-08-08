@@ -1,7 +1,6 @@
 services:
-  - type: web
-    name: sniper-bot
-    env: python
-    plan: free
+  - type: worker
+    name: pumpfun-sniper
+    runtime: python
     buildCommand: pip install -r requirements.txt
     startCommand: python main.py
