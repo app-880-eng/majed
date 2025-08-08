@@ -3,4 +3,4 @@ services:
     name: pumpfun-sniper
     runtime: python
     buildCommand: pip install -r requirements.txt
-    startCommand: python main.py
+    startCommand: python 2025.py
