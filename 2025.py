@@ -1,5 +1,8 @@
 # Pump.fun Sniper via Jupiter — BUY & SELL (startup ping)
 
+from tg_utils import send_telegram
+send_telegram("✅ البوت شغال بنجاح")
+
 import re, time, json, base64, requests
 from solana.rpc.api import Client
 from solders.keypair import Keypair
