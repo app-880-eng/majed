@@ -1,5 +1,5 @@
-TELEGRAM_TOKEN = "8295831234:AAHgdvWal7E_5_hsjPmbPiIEra4LBDRjbgU"
-TELEGRAM_CHAT_ID = "1820224574"
+TELEGRAM_TOKEN = "توكن_بوت_تيليجرام"
+TELEGRAM_CHAT_ID = "الـChatID"
 BUY_AMOUNT_SOL = 0.1
 STOP_LOSS_PERCENT = -20
-KEYPAIR_PATH = "keypair.json"
+KEYPAIR_PATH = "keypair/keypair.json"  # المسار لمفتاح المحفظة
