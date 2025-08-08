@@ -1,9 +1,12 @@
-TELEGRAM_TOKEN = "8295831234:AAHgdvWal7E_5_hsjPmbPiIEra4LBDRjbgU"
-TELEGRAM_CHAT_ID = "1820224574"
+# ===== إعدادات التليجرام =====
+TELEGRAM_TOKEN = "توكن_البوت_هنا"
+TELEGRAM_CHAT_ID = "اكتب_الـID_هنا"
 
-BUY_AMOUNT_SOL = 0.1           # قيمة كل عملية شراء
-STOP_LOSS_PERCENT = -20        # وقف خسارة
-TAKE_PROFIT_PERCENT = 25       # جني أرباح
+# ===== إعدادات التداول =====
+BUY_AMOUNT_SOL = 0.1         # كمية الشراء بـ SOL
+STOP_LOSS_PERCENT = 5        # نسبة وقف الخسارة
+TAKE_PROFIT_PERCENT = 10     # نسبة جني الأرباح
 
-KEYPAIR_PATH = "keypair/keypair.json"   # مسار ملف محفظتك
+# ===== إعدادات Solana =====
+KEYPAIR_PATH = "keypair.json"  # الملف مباشرة بجانب 2025.py
 RPC_URL = "https://api.mainnet-beta.solana.com"
