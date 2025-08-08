@@ -1,45 +1,57 @@
 import time
+import json
 import requests
 from solana.rpc.api import Client
-from config import TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, RPC_URL, WALLET_PRIVATE_KEY
+from solana.keypair import Keypair
+from solana.transaction import Transaction
+from solana.system_program import TransferParams, transfer
+from config import TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, BUY_AMOUNT_SOL, STOP_LOSS_PERCENT, KEYPAIR_PATH
 
-# إنشاء اتصال مع شبكة Solana
-client = Client(RPC_URL)
+# ====== إعداد عميل سولانا ======
+SOLANA_RPC_URL = "https://api.mainnet-beta.solana.com"
+client = Client(SOLANA_RPC_URL)
 
-# دالة إرسال رسالة إلى تيليجرام
-def send_telegram(message: str):
+# ====== تحميل بيانات المحفظة ======
+with open(KEYPAIR_PATH, "r") as f:
+    secret_key = json.load(f)
+keypair = Keypair.from_secret_key(bytes(secret_key))
+
+# ====== إرسال رسالة تيليجرام ======
+def send_telegram(text):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {
-        "chat_id": TELEGRAM_CHAT_ID,
-        "text": message
-    }
+    payload = {"chat_id": TELEGRAM_CHAT_ID, "text": text}
     try:
         requests.post(url, data=payload)
     except Exception as e:
-        print(f"خطأ في إرسال الرسالة: {e}")
+        print(f"خطأ في إرسال تيليجرام: {e}")
 
-# فحص العملات الجديدة (pump.fun مثال)
-def check_new_tokens():
-    # مكان جلب بيانات العملات الجديدة
-    # لازم تربط هنا API أو طريقة جلب البيانات من pump.fun
-    # الكود هذا فقط مثال
-    new_tokens = ["TokenA", "TokenB"]
-    return new_tokens
+# ====== تنفيذ أمر شراء ======
+def buy_new_token():
+    send_telegram("🚀 تم شراء العملة الجديدة بنجاح!")
+    # هنا تضع كود الشراء من pump.fun أو المنصة المطلوبة
 
-# شراء العملة
-def buy_token(token):
-    # هنا تكتب كود الشراء باستخدام WALLET_PRIVATE_KEY
-    send_telegram(f"تم شراء العملة: {token}")
+# ====== تنفيذ أمر بيع ======
+def sell_token():
+    send_telegram("💰 تم بيع العملة عند وصولها لوقف الخسارة أو الهدف.")
 
-# تشغيل البوت
-if __name__ == "__main__":
-    send_telegram("🚀 تم تشغيل البوت بنجاح!")
+# ====== مراقبة العملات ======
+def monitor_tokens():
     while True:
         try:
-            tokens = check_new_tokens()
-            for token in tokens:
-                buy_token(token)
-            time.sleep(10)  # كل 10 ثواني يفحص
+            # 🔍 منطق البحث عن عملة جديدة
+            # إذا تم العثور على عملة جديدة
+            buy_new_token()
+
+            # مثال لوقف الخسارة
+            price_drop = -25  # نسبة افتراضية كمثال
+            if price_drop <= STOP_LOSS_PERCENT:
+                sell_token()
+
         except Exception as e:
-            send_telegram(f"حدث خطأ: {e}")
-            time.sleep(5)
+            print(f"خطأ في المراقبة: {e}")
+
+        time.sleep(10)  # فاصل بين كل فحص
+
+if __name__ == "__main__":
+    send_telegram("✅ البوت بدأ العمل الآن.")
+    monitor_tokens()
