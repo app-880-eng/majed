@@ -1,2 +1,2 @@
-solana==0.29.0
+solana
 requests
