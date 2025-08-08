@@ -1,3 +1,2 @@
+solana-py
 requests
-pandas
-ta
