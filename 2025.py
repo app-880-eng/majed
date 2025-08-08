@@ -42,8 +42,8 @@ def startup_ping():
 # ===== محفظة =====
 def load_keypair(path: str) -> Keypair:
     with open(path, "r") as f:
-        sk = json.load(f)
-    return Keypair.from_secret_key(bytes(sk))
+        sk = json.load(f)                 # قائمة 64 بايت (secret key)
+    return Keypair.from_bytes(bytes(sk))   # ← التعديل هنا
 
 # ===== جلب توكنات pump.fun =====
 def get_new_token_mints():
@@ -80,7 +80,7 @@ def send_signed_txn(swap_tx_b64: str) -> str:
     # نفك base64، نوقّع بالمحفظة، نرسل
     raw = base64.b64decode(swap_tx_b64)
     tx = Transaction.deserialize(raw)
-    tx.sign([WALLET])  # solders transaction يوقّع بمصفوفة مفاتيح
+    tx.sign([WALLET])  # solders.Transaction يوقّع بمصفوفة مفاتيح
     sig = client.send_raw_transaction(bytes(tx), opts=TxOpts(skip_preflight=True, preflight_commitment=Confirmed))["result"]
     client.confirm_transaction(sig)
     return sig
@@ -93,7 +93,12 @@ def buy_token(mint: str, sol_amount: float):
         return None
     swap_b64 = jup_swap(q, str(WALLET.pubkey()))
     sig = send_signed_txn(swap_b64)
-    return {"sig": sig, "inAmount": lamports, "outAmount": int(q["outAmount"]), "price": lamports / max(1, int(q["outAmount"]))}
+    return {
+        "sig": sig,
+        "inAmount": lamports,
+        "outAmount": int(q["outAmount"]),
+        "price": lamports / max(1, int(q["outAmount"]))
+    }
 
 def sell_token(mint: str, token_amount_raw: int):
     q = jup_quote(mint, SOL_MINT, token_amount_raw)
@@ -136,7 +141,7 @@ def run():
     while True:
         try:
             for mint in get_new_token_mints():
-                if mint in seen: 
+                if mint in seen:
                     continue
                 seen.add(mint)
                 send_telegram(f"🚀 توكن جديد: https://pump.fun/token/{mint}")
