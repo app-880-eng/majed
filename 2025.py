@@ -3,7 +3,6 @@ import time
 import requests
 from solana.keypair import Keypair
 from solana.rpc.api import Client
-from solana.rpc.types import TxOpts
 from config import TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, BUY_AMOUNT_SOL, STOP_LOSS_PERCENT, KEYPAIR_PATH
 from telegram_utils import send_telegram
 
@@ -23,13 +22,12 @@ def get_new_tokens():
 
 def execute_fake_buy(token_url, sol_amount):
     send_telegram(f"🚀 تم اكتشاف عملة جديدة: {token_url}")
-    send_telegram(f"🛒 تنفيذ شراء فعلي بقيمة {sol_amount} SOL للعملة الجديدة.")
+    send_telegram(f"🛒 تنفيذ شراء وهمي بقيمة {sol_amount} SOL للعملة الجديدة.")
     print(f"شراء فعلي {sol_amount} SOL للرمز: {token_url}")
 
 def main():
     keypair = load_keypair(KEYPAIR_PATH)
     client = Client("https://api.mainnet-beta.solana.com")
-
     print("✅ البوت شغال وجاهز لاقتناص العملات الجديدة على pump.fun")
 
     seen_tokens = set()
