@@ -9,3 +9,5 @@ TAKE_PROFIT_PERCENT = 25       # +25% جني أرباح (تقدر تغيرها)
 # مسارات
 KEYPAIR_PATH = "keypair/keypair.json"
 RPC_URL = "https://api.mainnet-beta.solana.com"
+TAKE_PROFIT_PERCENT = 25     # جني أرباح +25%
+RPC_URL = "https://api.mainnet-beta.solana.com"
