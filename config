@@ -1,5 +1,11 @@
 TELEGRAM_TOKEN = "8295831234:AAHgdvWal7E_5_hsjPmbPiIEra4LBDRjbgU"
 TELEGRAM_CHAT_ID = "1820224574"
-BUY_AMOUNT_SOL = 0.1
-STOP_LOSS_PERCENT = -20
-KEYPAIR_PATH = "keypair/keypair.json"  # مسار ملف المفتاح الخاص بالمحفظة
+
+# إدارة رأس المال
+BUY_AMOUNT_SOL = 0.1           # قيمة كل عملية شراء
+STOP_LOSS_PERCENT = -20        # −20% وقف خسارة
+TAKE_PROFIT_PERCENT = 25       # +25% جني أرباح (تقدر تغيرها)
+
+# مسارات
+KEYPAIR_PATH = "keypair/keypair.json"
+RPC_URL = "https://api.mainnet-beta.solana.com"
