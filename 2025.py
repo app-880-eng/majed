@@ -2,7 +2,7 @@
 
 import re, time, json, base64, requests
 from solana.rpc.api import Client
-from solana.keypair import Keypair
+from solders.keypair import Keypair
 from solana.transaction import Transaction
 from solana.rpc.types import TxOpts
 from solana.rpc.commitment import Confirmed
