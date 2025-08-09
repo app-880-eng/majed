@@ -1,6 +1,6 @@
-# Pump.fun Sniper via Jupiter — BUY & SELL (Render-ready, secrets in config.py)
+# Pump.fun Sniper via Jupiter — BUY & SELL (Render-ready, with auto keypair fix)
 
-import re, os, time, json, base64, requests
+import os, re, time, json, base64, requests, base58
 from pathlib import Path
 
 # Solana client
@@ -8,15 +8,14 @@ from solana.rpc.api import Client
 from solana.rpc.types import TxOpts
 from solana.rpc.commitment import Confirmed
 
-# Use solders for keypair/transaction (modern)
+# solders (حديث) للمفاتيح والمعاملات
 from solders.keypair import Keypair
 from solders.transaction import Transaction
 
-# For generating keypair.json from mnemonic (first run)
+# لتوليد keypair.json من الـ mnemonic
 from mnemonic import Mnemonic
 from bip_utils import Bip39SeedGenerator, Bip44, Bip44Coins, Bip44Changes
 from nacl.signing import SigningKey
-import base58
 
 from config import (
     TELEGRAM_TOKEN, TELEGRAM_CHAT_ID,
@@ -24,7 +23,7 @@ from config import (
     KEYPAIR_PATH, RPC_URL, MNEMONIC
 )
 
-# ===== Constants =====
+# ===== ثوابت =====
 SOL_MINT = "So11111111111111111111111111111111111111112"
 JUP_QUOTE = "https://quote-api.jup.ag/v6/quote"
 JUP_SWAP  = "https://quote-api.jup.ag/v6/swap"
@@ -34,15 +33,13 @@ client = Client(RPC_URL)
 WALLET: Keypair | None = None
 STARTUP_SENT = False
 
-
-# ---- Telegram (single sender) ----
+# ===== Telegram =====
 def send_telegram(msg: str):
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
         requests.post(url, data={"chat_id": TELEGRAM_CHAT_ID, "text": msg}, timeout=10)
     except Exception as e:
         print("Telegram error:", e)
-
 
 def startup_ping(pubkey_b58: str | None = None):
     global STARTUP_SENT
@@ -51,47 +48,62 @@ def startup_ping(pubkey_b58: str | None = None):
         send_telegram("✅ تشغيل البوت (Jupiter mode) — بدأنا الرصد" + note)
         STARTUP_SENT = True
 
+# ===== توليد/تصحيح keypair.json تلقائياً =====
+def _is_valid_secret_list(x):
+    # list بطول 64، كل عنصر int بين 0..255
+    return isinstance(x, list) and len(x) == 64 and all(isinstance(i, int) and 0 <= i <= 255 for i in x)
 
-# ---- Keypair helpers ----
-def ensure_keypair_from_mnemonic(path: str, mnemonic: str):
+def ensure_keypair_from_mnemonic_safe(path: str, mnemonic: str):
     """
-    إذا ما لقي keypair.json نولّده من الـ MNEMONIC (m/44'/501'/0'/0'/0)
+    إن كان الملف غير موجود، أو فاضي/JSON خاطئ، أو ليس مصفوفة 64 رقم:
+    نولّده من MNEMONIC على مسار Solana: m/44'/501'/0'/0'/0
     """
-    if Path(path).exists():
-        return None  # already there
+    try:
+        p = Path(path)
+        need_make = True
+        if p.exists() and p.stat().st_size > 0:
+            try:
+                with open(p, "r") as f:
+                    data = json.load(f)
+                if _is_valid_secret_list(data):
+                    need_make = False
+            except Exception:
+                need_make = True
 
-    seed = Bip39SeedGenerator(mnemonic).Generate()
-    ctx = (Bip44.FromSeed(seed, Bip44Coins.SOLANA)
-           .Purpose().Coin().Account(0).Change(Bip44Changes.CHAIN_EXT).AddressIndex(0))
-    priv32 = ctx.PrivateKey().Raw().ToBytes()           # 32 bytes
-    signer = SigningKey(priv32)                         # Ed25519
-    secret64 = signer._seed + signer.verify_key.encode()  # 64 bytes
+        if not need_make:
+            return None  # صالح
 
-    with open(path, "w") as f:
-        json.dump(list(secret64), f)
+        seed = Bip39SeedGenerator(mnemonic).Generate()
+        ctx = (Bip44.FromSeed(seed, Bip44Coins.SOLANA)
+               .Purpose().Coin().Account(0).Change(Bip44Changes.CHAIN_EXT).AddressIndex(0))
+        priv32 = ctx.PrivateKey().Raw().ToBytes()          # 32 bytes
+        signer = SigningKey(priv32)                         # Ed25519
+        secret64 = signer._seed + signer.verify_key.encode()  # 64 bytes = private+public
 
-    pubkey_b58 = base58.b58encode(signer.verify_key.encode()).decode()
-    return pubkey_b58
+        with open(p, "w") as f:
+            json.dump(list(secret64), f)
 
+        pubkey_b58 = base58.b58encode(signer.verify_key.encode()).decode()
+        return pubkey_b58
+    except Exception as e:
+        raise RuntimeError(f"failed to ensure keypair.json: {e}")
 
 def load_keypair(path: str) -> Keypair:
     with open(path, "r") as f:
-        secret = json.load(f)       # list of 64 ints
+        secret = json.load(f)           # list of 64 ints
     return Keypair.from_bytes(bytes(secret))  # solders
 
-
-# ---- Pump.fun feed ----
+# ===== جلب توكنات pump.fun =====
 def get_new_token_mints():
     try:
         html = requests.get(FEED_URL, timeout=15).text
-        # links like: https://pump.fun/token/<MINT>
+        # https://pump.fun/token/<MINT>
         return list(dict.fromkeys(re.findall(r"https://pump\.fun/token/([A-Za-z0-9]+)", html)))
     except Exception as e:
         print("feed error:", e)
         return []
 
-
-# ---- Jupiter Quote/Swap ----
+# ===== Jupiter Quote/Swap =====
 def jup_quote(input_mint, output_mint, amount_lamports, slippage_bps=300):
     r = requests.get(JUP_QUOTE, params={
         "inputMint": input_mint, "outputMint": output_mint,
@@ -102,7 +114,6 @@ def jup_quote(input_mint, output_mint, amount_lamports, slippage_bps=300):
     data = r.json()
     return data["data"][0] if data.get("data") else None
 
-
 def jup_swap(quote_resp, user_pubkey, wrap_and_unwrap_sol=True):
     r = requests.post(JUP_SWAP, json={
         "quoteResponse": quote_resp,
@@ -111,13 +122,12 @@ def jup_swap(quote_resp, user_pubkey, wrap_and_unwrap_sol=True):
         "prioritizationFeeLamports": "auto",
     }, timeout=25)
     r.raise_for_status()
-    return r.json().get("swapTransaction")  # base64-encoded tx
-
+    return r.json().get("swapTransaction")  # base64 tx
 
 def send_signed_txn(swap_tx_b64: str) -> str:
     raw = base64.b64decode(swap_tx_b64)
     tx = Transaction.deserialize(raw)
-    tx.sign([WALLET])  # sign with wallet
+    tx.sign([WALLET])  # توقيع بالمحفظة
     sig = client.send_raw_transaction(
         bytes(tx),
         opts=TxOpts(skip_preflight=True, preflight_commitment=Confirmed)
@@ -125,8 +135,7 @@ def send_signed_txn(swap_tx_b64: str) -> str:
     client.confirm_transaction(sig)
     return sig
 
-
-# ---- Buy / Sell ----
+# ===== شراء/بيع =====
 def buy_token(mint: str, sol_amount: float):
     lamports = int(sol_amount * 1_000_000_000)
     q = jup_quote(SOL_MINT, mint, lamports)
@@ -138,9 +147,8 @@ def buy_token(mint: str, sol_amount: float):
         "sig": sig,
         "inAmount": lamports,
         "outAmount": int(q["outAmount"]),
-        "price": lamports / max(1, int(q["outAmount"])),  # SOL per token (approx)
+        "price": lamports / max(1, int(q["outAmount"])),  # SOL لكل توكن (تقريبي)
     }
-
 
 def sell_token(mint: str, token_amount_raw: int):
     q = jup_quote(mint, SOL_MINT, token_amount_raw)
@@ -148,7 +156,6 @@ def sell_token(mint: str, token_amount_raw: int):
         return None
     swap_b64 = jup_swap(q, str(WALLET.pubkey()))
     return send_signed_txn(swap_b64)
-
 
 def monitor_position(mint: str, entry_price: float, amount_tokens: int):
     send_telegram(f"📈 تتبع {mint}\nسعر الدخول: {entry_price:.10f} SOL/Token")
@@ -175,19 +182,22 @@ def monitor_position(mint: str, entry_price: float, amount_tokens: int):
             send_telegram(f"⚠️ monitor error: {e}")
             time.sleep(10)
 
-
+# ===== التشغيل =====
 def run():
     global WALLET
-    # إن لم يوجد keypair.json سنولّده من MNEMONIC
-    pub_b58 = ensure_keypair_from_mnemonic(KEYPAIR_PATH, MNEMONIC)
+    try:
+        pub_b58 = ensure_keypair_from_mnemonic_safe(KEYPAIR_PATH, MNEMONIC)
+    except Exception as e:
+        send_telegram(f"⚠️ keypair init error: {e}")
+        raise
+
     WALLET = load_keypair(KEYPAIR_PATH)
     if pub_b58:
-        send_telegram(f"🔑 تم توليد المفتاح تلقائيًا\nPubkey: {pub_b58}")
+        send_telegram(f"🔑 تم إنشاء/تصحيح keypair.json\nPubkey: {pub_b58}")
 
-    # إشعار تشغيل مرة واحدة
     startup_ping(str(WALLET.pubkey()))
-
     seen = set()
+
     while True:
         try:
             for mint in get_new_token_mints():
@@ -201,15 +211,16 @@ def run():
                     send_telegram("⚠️ فشل الشراء (quote/swap غير صالح)")
                     continue
 
-                send_telegram(f"🛒 اشترينا {BUY_AMOUNT_SOL} SOL\n"
-                              f"Tokens≈ {res['outAmount']}\nTx: {res['sig']}")
+                send_telegram(
+                    f"🛒 اشترينا {BUY_AMOUNT_SOL} SOL\n"
+                    f"Tokens≈ {res['outAmount']}\nTx: {res['sig']}"
+                )
                 monitor_position(mint, res["price"], res["outAmount"])
 
             time.sleep(15)
         except Exception as e:
             send_telegram(f"⚠️ runtime error: {e}")
             time.sleep(15)
-
 
 if __name__ == "__main__":
     run()
