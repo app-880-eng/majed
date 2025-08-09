@@ -7,9 +7,9 @@ BUY_AMOUNT_SOL = 0.1           # كمية الشراء بالـ SOL لكل تو�
 STOP_LOSS_PERCENT = -20        # وقف خسارة (%)
 TAKE_PROFIT_PERCENT = 25       # جني أرباح (%)
 
-# ===== Solana =====
+# ===== Solana / RPC =====
 RPC_URL = "https://api.mainnet-beta.solana.com"
-
-# سنولّد keypair.json تلقائيًا من العبارة لو مهو موجود
 KEYPAIR_PATH = "keypair.json"
+
+# عبارة الاسترداد لمحفظة فانتوم
 MNEMONIC = "gospel tribe desert endless often trigger off warfare devote wing wall penalty"
