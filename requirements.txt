@@ -1,0 +1,7 @@
+solana
+solders
+requests
+bip-utils
+mnemonic
+pynacl
+base58
