@@ -34,7 +34,7 @@ BREAKOUT_MIN_PCT = 1.0
 TAKER_BUY_RATIO_MIN = 0.62
 DAY_CHANGE_MIN_PCT = 1.5
 
-# ====== دورات عمل (للعمّال اليدويين إن أبقيتها) ======
+# ====== دورات عمل (لليدويين إذا فعّلتهم) ======
 SNIPER_POLL_SEC = 90
 WHALES_POLL_SEC = 90
 
@@ -292,7 +292,11 @@ def whales_worker():
                         seen[key] = True
                         send_telegram(
                             f"🐋 *Whale Signal* — {symbol}\n"
-                            f"• التاريخ: {date}\n• العملية: {side}\n• الوثوق: {conf}\n• المصدر: {source}\n• ملاحظة: {note}"
+                            f"• التاريخ: {date}\n"
+                            f"• العملية: {side}\n"
+                            f"• الوثوق: {conf}\n"
+                            f"• المصدر: {source}\n"
+                            f"• ملاحظة: {note}"
                         )
                 _set_json(WHALES_SEEN_FILE, seen)
         except Exception as e:
@@ -343,7 +347,7 @@ def auto_sniper_worker():
                 sent["count"] = {"date": today, "n": 0}
 
             if sent["count"]["n"] >= MAX_AUTO_SNIPER_PER_DAY:
-                time.sleep(AUTO_SNIPER_POLL_SEC); 
+                time.sleep(AUTO_SNIPER_POLL_SEC)
                 continue
 
             for sym in get_top_usdt_symbols():
