@@ -6,22 +6,21 @@ import os, time, json, csv, hashlib, datetime
 import requests
 import pandas as pd
 
-# ====== إعدادات ======
-TELEGRAM_TOKEN = "PUT_YOUR_TELEGRAM_BOT_TOKEN"
-TELEGRAM_CHAT_ID = "PUT_YOUR_CHAT_ID"
+# ====== إعدادات تيليجرام ======
+TELEGRAM_TOKEN = "8295831234:AAHgdvWal7E_5_hsjPmbPiIEra4LBDRjbgU"
+TELEGRAM_CHAT_ID = "1820224574"
 
-BASE_USDT = True                   # فلترة الأزواج على USDT فقط
-MIN_24H_VOLUME_USDT = 5_000_000    # حد أدنى للسيولة اليومية
-INTERVAL = "5m"                    # إطار التحليل
-LIMIT = 600                        # عدد الشمعات (~2 يوم بيانات 5m)
-
-DAILY_SIGNAL_HOUR_LOCAL = 10       # وقت إرسال الصفقة اليومية (توقيت الكويت UTC+3)
-MIN_EXPECTED_MOVE_PCT = 2.0        # هدف الربح اليومي
-SL_ATR_MULT = 1.5                  # وقف الخسارة = ATR × هذا المعامل
-MAX_CANDIDATES = 40                # عدد أفضل الأزواج اللي نفحصها
-
-SNIPER_POLL_SEC = 90               # فحص فرص Sniper كل X ثانية
-WHALES_POLL_SEC = 90               # فحص إشارات الحيتان كل X ثانية
+# ====== إعدادات التداول ======
+BASE_USDT = True
+MIN_24H_VOLUME_USDT = 5_000_000
+INTERVAL = "5m"
+LIMIT = 600
+DAILY_SIGNAL_HOUR_LOCAL = 10
+MIN_EXPECTED_MOVE_PCT = 2.0
+SL_ATR_MULT = 1.5
+MAX_CANDIDATES = 40
+SNIPER_POLL_SEC = 90
+WHALES_POLL_SEC = 90
 
 DATA_DIR = "data"
 STATE_DIR = "state"
@@ -44,10 +43,16 @@ if not os.path.exists(WHALES_FILE):
         w.writerow(["date","symbol","side","confidence","source","note"])
         w.writerow([datetime.date.today().isoformat(),"BTCUSDT","BUY","0.8","Example","Address X accumulated 200 BTC"])
 
+# ====== فحص المتغيرات ======
+def require_env():
+    missing = []
+    if not TELEGRAM_TOKEN or "PUT_" in TELEGRAM_TOKEN: missing.append("TELEGRAM_TOKEN")
+    if not TELEGRAM_CHAT_ID or "PUT_" in TELEGRAM_CHAT_ID: missing.append("TELEGRAM_CHAT_ID")
+    if missing:
+        raise RuntimeError(f"Missing required env: {', '.join(missing)}")
+
 # ====== تيليجرام ======
 def send_telegram(text: str):
-    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
-        print("⚠️ ضع TELEGRAM_TOKEN و CHAT_ID في أعلى الملف.", flush=True); return
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
         requests.post(url, data={"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "Markdown"}, timeout=15)
@@ -78,22 +83,18 @@ def get_klines(symbol: str, interval: str, limit: int) -> pd.DataFrame:
 def compute_indicators(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty: return df
     close = df["close"]
-    # EMA
     df["ema50"] = close.ewm(span=50, adjust=False).mean()
     df["ema200"] = close.ewm(span=200, adjust=False).mean()
-    # RSI (14)
     delta = close.diff()
     gain = (delta.where(delta > 0, 0)).ewm(alpha=1/14, adjust=False).mean()
     loss = (-delta.where(delta < 0, 0)).ewm(alpha=1/14, adjust=False).mean()
     rs = gain / (loss + 1e-12)
     df["rsi"] = 100 - (100 / (1 + rs))
-    # MACD (12,26,9)
     ema12 = close.ewm(span=12, adjust=False).mean()
     ema26 = close.ewm(span=26, adjust=False).mean()
     df["macd"] = ema12 - ema26
     df["macd_signal"] = df["macd"].ewm(span=9, adjust=False).mean()
     df["macd_hist"] = df["macd"] - df["macd_signal"]
-    # OBV
     obv = [0.0]
     for i in range(1, len(df)):
         if df.loc[i,"close"] > df.loc[i-1,"close"]: obv.append(obv[-1] + df.loc[i,"volume"])
@@ -101,7 +102,6 @@ def compute_indicators(df: pd.DataFrame) -> pd.DataFrame:
         else: obv.append(obv[-1])
     df["obv"] = obv
     df["obv_slope"] = df["obv"].diff().rolling(10).mean()
-    # ATR(14)
     high, low, prev_close = df["high"], df["low"], df["close"].shift(1)
     tr = pd.concat([(high-low),(high-prev_close).abs(),(low-prev_close).abs()], axis=1).max(axis=1)
     df["atr"] = tr.rolling(14).mean()
@@ -167,7 +167,7 @@ def compose_daily_msg(sig: dict) -> str:
         "ملاحظة: هذه توصية تحليل وليست أمرًا ماليًا."
     )
 
-# ====== Helpers للحالة ======
+# ====== Helpers ======
 def _get_json(path, default):
     try:
         with open(path,"r",encoding="utf-8") as f: return json.load(f)
@@ -175,13 +175,13 @@ def _get_json(path, default):
 def _set_json(path, obj):
     with open(path,"w",encoding="utf-8") as f: json.dump(obj, f, ensure_ascii=False, indent=2)
 
-# ====== Daily Worker ======
+# ====== Workers ======
 def daily_worker():
     send_telegram("✅ المنصة تعمل — (Daily + Sniper + Whales) | تنبيهات فقط.")
     last_sent_date = None
     while True:
         now_utc = datetime.datetime.utcnow()
-        kw_now = now_utc + datetime.timedelta(hours=3)  # توقيت الكويت
+        kw_now = now_utc + datetime.timedelta(hours=3)
         if kw_now.hour == DAILY_SIGNAL_HOUR_LOCAL:
             today = kw_now.date().isoformat()
             if last_sent_date != today:
@@ -194,7 +194,6 @@ def daily_worker():
                     send_telegram(f"⚠️ Daily error: {e}")
         time.sleep(60)
 
-# ====== Sniper Worker ======
 def sniper_worker():
     sent = _get_json(SNIPER_SENT_FILE, {})
     while True:
@@ -218,7 +217,6 @@ def sniper_worker():
             send_telegram(f"⚠️ Sniper error: {e}")
         time.sleep(SNIPER_POLL_SEC)
 
-# ====== Whales Worker ======
 def _valid_binance_symbols():
     syms = set()
     for d in get_24h_tickers():
@@ -257,7 +255,11 @@ def whales_worker():
         if tick % 20 == 0: valid = _valid_binance_symbols()
         time.sleep(WHALES_POLL_SEC)
 
+# ====== Main ======
 if __name__ == "__main__":
+    require_env()
+    print("✅ Worker starting…", flush=True)
+    send_telegram("✅ البوت بدأ العمل على Render (Worker).")
     import threading
     threading.Thread(target=daily_worker, daemon=True).start()
     threading.Thread(target=sniper_worker, daemon=True).start()
