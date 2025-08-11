@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: telegram-daily-picks-2025
+    env: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn 2025:app --host 0.0.0.0 --port $PORT
+    autoDeploy: true
+    envVars:
+      - key: TELEGRAM_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
