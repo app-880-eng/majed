@@ -12,8 +12,8 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 
 # ========= الإعدادات =========
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "PUT_YOUR_TELEGRAM_TOKEN_HERE")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "PUT_YOUR_CHAT_ID_HERE")
+TELEGRAM_TOKEN = "8295831234:AAHgdvWal7E_5_hsjPmbPiIEra4LBDRjbgU"
+TELEGRAM_CHAT_ID = "1820224574"
 
 BINANCE_BASE = "https://api.binance.com"
 KUWAIT_TZ = pytz.timezone("Asia/Kuwait")
@@ -24,12 +24,6 @@ app = FastAPI(title="Telegram Crypto Picks Every 12 Hours")
 
 # ========= دوال مساعدة =========
 async def send_telegram(text: str):
-    if not TELEGRAM_TOKEN or "PUT_YOUR" in TELEGRAM_TOKEN:
-        print("⚠️ TELEGRAM_TOKEN غير مضبوط")
-        return
-    if not TELEGRAM_CHAT_ID or "PUT_YOUR" in TELEGRAM_CHAT_ID:
-        print("⚠️ TELEGRAM_CHAT_ID غير مضبوط")
-        return
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {"chat_id": TELEGRAM_CHAT_ID, "text": text}
     timeout = httpx.Timeout(15.0)
