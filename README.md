@@ -1,11 +1,14 @@
-# Trading Suite (Signals Only)
-- صفقة يومية واحدة (هدف +2%) لعملات Binance فقط
-- تنبيهات Sniper من `data/manual_sniper.json`
-- تنبيهات Whales من `data/whales_signals.csv`
-- بدون ربط بمحفظة — إشعارات فقط
+# Telegram Crypto Picks — Every 12h
 
-## التشغيل
-1) عدّل أعلى `2025.py` وضع TELEGRAM_TOKEN و CHAT_ID.
-2) ثبّت المتطلبات:
-   ```bash
-   pip install -r requirements.txt
+## الخطوات
+1) ارفع هذه الملفات إلى مستودع GitHub جديد.
+2) في Render: New → Web Service → اربط المستودع.
+3) Build: `pip install -r requirements.txt`
+4) Start: `uvicorn 2025:app --host 0.0.0.0 --port $PORT`
+5) أضف متغيرات البيئة:
+   - `TELEGRAM_TOKEN` = توكن بوتك
+   - `TELEGRAM_CHAT_ID` = رقم الـ ID في تليجرام
+6) Deploy. أول ما يشتغل البوت، بيرسل رسالة “✅ تم تشغيل البوت…”.
+7) بعدها توصية كل 12 ساعة تلقائيًا.
+
+> لضبط وقت البداية (مثلاً تبدأ أول توصية 08:00 الكويت)، شغّل الخدمة ثم من لوحة Render اضغط **Manual Deploy** قريبًا من الوقت المطلوب؛ الجدول يتكرر كل 12 ساعة من لحظة التشغيل.
