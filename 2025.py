@@ -10,11 +10,25 @@ import pandas as pd
 TELEGRAM_TOKEN = "8295831234:AAHgdvWal7E_5_hsjPmbPiIEra4LBDRjbgU"
 TELEGRAM_CHAT_ID = "1820224574"
 
+# ====== إعداد البروكسي (اختر واحد: متغير بيئة أو ثابت داخل الكود) ======
+# 1) من متغير البيئة PROXY_URL (مستحسن على Render)
+ENV_PROXY = os.getenv("PROXY_URL", "").strip()
+# 2) ثابت اختياري داخل الكود (اتركه فارغ لو ما تبي)
+HARDCODE_PROXY = ""  # مثال: "http://user:pass@host:port"
+
+PROXY_URL = (ENV_PROXY or HARDCODE_PROXY).strip()
+session = requests.Session()
+if PROXY_URL:
+    session.proxies = {"http": PROXY_URL, "https": PROXY_URL}
+    print(f"[i] Proxy enabled → {PROXY_URL}", flush=True)
+else:
+    print("[i] No proxy configured", flush=True)
+
+# ====== إرسال تيليجرام ======
 def send_telegram(text: str):
-    """إرسال رسالة نصية إلى تيليجرام"""
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-        requests.post(url, data={"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "Markdown"}, timeout=15)
+        session.post(url, data={"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "Markdown"}, timeout=15)
     except Exception as e:
         print(f"Telegram error: {e}", flush=True)
 
@@ -26,9 +40,7 @@ LIMIT = 600
 DAILY_SIGNAL_HOUR_LOCAL = 10   # توقيت الكويت (UTC+3)
 MIN_EXPECTED_MOVE_PCT = 2.0
 SL_ATR_MULT = 1.5
-
-# Aggressive
-MAX_CANDIDATES = 60
+MAX_CANDIDATES = 60  # Aggressive
 
 # ====== Auto-Sniper (اختراقات) ======
 AUTO_SNIPER_ENABLED = True
@@ -72,7 +84,7 @@ STATUS_SENT_FILE  = os.path.join(STATE_DIR, "status_sent.json")
 AUTO_SNIPER_SENT_FILE = os.path.join(STATE_DIR, "auto_sniper_sent.json")
 AUTO_WHALES_SENT_FILE = os.path.join(STATE_DIR, "auto_whales_sent.json")
 MOM_SENT_FILE = os.path.join(STATE_DIR, "momentum_sent.json")
-NET_STATUS_FILE = os.path.join(STATE_DIR, "net_status.json")  # تنبيه فشل الشبكة
+NET_STATUS_FILE = os.path.join(STATE_DIR, "net_status.json")  # تنبيه الشبكة
 
 # ====== إنشاء ملفات افتراضية ======
 if not os.path.exists(SNIPER_FILE):
@@ -89,7 +101,7 @@ def require_env():
     if not TELEGRAM_CHAT_ID or "PUT_" in TELEGRAM_CHAT_ID: miss.append("TELEGRAM_CHAT_ID")
     if miss: raise RuntimeError("Missing required env: " + ", ".join(miss))
 
-# ====== Binance (تجريب عدة نودز + بروكسي اختياري + تنبيه فشل) ======
+# ====== Binance (تعدد الدومينات + بروكسي + تنبيه فشل) ======
 API_BASES = [
     "https://api.binance.me",
     "https://api1.binance.com",
@@ -97,8 +109,6 @@ API_BASES = [
     "https://api3.binance.com",
     "https://api.binance.com",
 ]
-PROXY_URL = os.environ.get("PROXY_URL", "").strip()
-PROXIES = {"http": PROXY_URL, "https": PROXY_URL} if PROXY_URL else None
 
 def _read(path, default):
     try:
@@ -115,7 +125,6 @@ def _date_kw():
     return _now_kw().date().isoformat()
 
 def _alert_network_failure(last_err: str):
-    """يرسل تنبيه فشل Binance مرة كل ساعة فقط."""
     st = _read(NET_STATUS_FILE, {"last_alert": "1970-01-01T00:00:00", "last_ok": None})
     try:
         last_alert = datetime.datetime.fromisoformat(st.get("last_alert", "1970-01-01T00:00:00"))
@@ -123,10 +132,7 @@ def _alert_network_failure(last_err: str):
         last_alert = datetime.datetime(1970,1,1)
     if (_now_kw() - last_alert).total_seconds() >= 3600:
         msg = "⚠️ تعذّر الاتصال ببيانات Binance.\n"
-        if PROXY_URL:
-            msg += f"• Proxy: مفعل\n"
-        else:
-            msg += f"• Proxy: غير مفعل — يُنصح بإضافة متغير PROXY_URL في Render.\n"
+        msg += f"• Proxy: {'مفعل' if PROXY_URL else 'غير مفعل — أضف PROXY_URL في Render'}\n"
         msg += f"• آخر خطأ: {last_err}"
         send_telegram(msg)
         st["last_alert"] = _now_kw().isoformat(timespec="seconds")
@@ -141,7 +147,7 @@ def bget(path, params=None):
     last_err = None
     for base in API_BASES:
         try:
-            r = requests.get(f"{base}{path}", params=params, timeout=20, proxies=PROXIES)
+            r = session.get(f"{base}{path}", params=params, timeout=20)
             if r.status_code == 451:
                 last_err = f"451 from {base}"
                 continue
