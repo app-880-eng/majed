@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# Trading Suite — Binance Daily Signal (+2%) + Auto-Sniper + Auto-Whales
+# Trading Suite — Binance Daily Signal (+2%) + Auto-Sniper + Auto-Whales + Momentum Pulse
 # تنبيهات تيليجرام فقط (بدون ربط بمحفظة)
 
 import os, time, json, csv, hashlib, datetime
@@ -10,7 +10,7 @@ import pandas as pd
 TELEGRAM_TOKEN = "8295831234:AAHgdvWal7E_5_hsjPmbPiIEra4LBDRjbgU"
 TELEGRAM_CHAT_ID = "1820224574"
 
-# ====== إعدادات التداول ======
+# ====== إعدادات التداول العامة ======
 BASE_USDT = True
 MIN_24H_VOLUME_USDT = 5_000_000
 INTERVAL = "5m"
@@ -18,21 +18,32 @@ LIMIT = 600
 DAILY_SIGNAL_HOUR_LOCAL = 10   # توقيت الكويت (UTC+3)
 MIN_EXPECTED_MOVE_PCT = 2.0
 SL_ATR_MULT = 1.5
-MAX_CANDIDATES = 40
 
-# ====== Auto Mode (بدون إدخال يدوي) ======
+# Aggressive: فحص رموز أكثر لفرص أكثر
+MAX_CANDIDATES = 60
+
+# ====== Auto-Sniper (اختراقات) ======
 AUTO_SNIPER_ENABLED = True
+AUTO_SNIPER_POLL_SEC = 90        # كان 180
+AUTO_SNIPER_COOLDOWN_MIN = 25    # كان 45
+MAX_AUTO_SNIPER_PER_DAY = 12     # كان 6
+SNIPER_SCORE_MIN = 3.0           # كان 4.0 أسهل
+BREAKOUT_MIN_PCT = 0.5           # كان 1.0
+
+# ====== Auto-Whales (نشاط تاكر شراء مع سيولة) ======
 AUTO_WHALES_ENABLED = True
-AUTO_SNIPER_POLL_SEC = 180
-AUTO_WHALES_POLL_SEC = 180
-AUTO_SNIPER_COOLDOWN_MIN = 45
-AUTO_WHALES_COOLDOWN_MIN = 60
-MAX_AUTO_SNIPER_PER_DAY = 6
-MAX_AUTO_WHALES_PER_DAY = 6
-SNIPER_SCORE_MIN = 4.0
-BREAKOUT_MIN_PCT = 1.0
-TAKER_BUY_RATIO_MIN = 0.62
-DAY_CHANGE_MIN_PCT = 1.5
+AUTO_WHALES_POLL_SEC = 120       # كان 180
+AUTO_WHALES_COOLDOWN_MIN = 40    # كان 60
+MAX_AUTO_WHALES_PER_DAY = 10     # كان 6
+TAKER_BUY_RATIO_MIN = 0.58       # كان 0.62
+DAY_CHANGE_MIN_PCT = 1.0         # كان 1.5
+
+# ====== Momentum Pulse (إشارات زخم) ======
+MOMENTUM_ENABLED = True
+MOM_POLL_SEC = 120
+MOM_COOLDOWN_MIN = 30
+MAX_MOM_PER_DAY = 12
+MOM_RSI_MIN = 55
 
 # ====== دورات عمل (لليدويين إذا فعّلتهم) ======
 SNIPER_POLL_SEC = 90
@@ -48,12 +59,14 @@ SNIPER_FILE       = os.path.join(DATA_DIR, "manual_sniper.json")
 WHALES_FILE       = os.path.join(DATA_DIR, "whales_signals.csv")
 SNIPER_SENT_FILE  = os.path.join(STATE_DIR, "sniper_sent.json")
 WHALES_SEEN_FILE  = os.path.join(STATE_DIR, "whales_seen.json")
-STARTUP_SENT_FILE = os.path.join(STATE_DIR, "startup_sent.json")   # منع تكرار رسالة البدء يوميًا
-STATUS_SENT_FILE  = os.path.join(STATE_DIR, "status_sent.json")    # منع تكرار “المنصة تعمل” يوميًا
+
+STARTUP_SENT_FILE = os.path.join(STATE_DIR, "startup_sent.json")   # رسالة البدء يوميًا لمرة واحدة
+STATUS_SENT_FILE  = os.path.join(STATE_DIR, "status_sent.json")    # “المنصة تعمل” يوميًا لمرة واحدة
 AUTO_SNIPER_SENT_FILE = os.path.join(STATE_DIR, "auto_sniper_sent.json")
 AUTO_WHALES_SENT_FILE = os.path.join(STATE_DIR, "auto_whales_sent.json")
+MOM_SENT_FILE = os.path.join(STATE_DIR, "momentum_sent.json")
 
-# ====== إنشاء ملفات افتراضية (بدون أمثلة مزعجة) ======
+# ====== إنشاء ملفات افتراضية ======
 if not os.path.exists(SNIPER_FILE):
     with open(SNIPER_FILE, "w", encoding="utf-8") as f:
         json.dump([], f, ensure_ascii=False, indent=2)
@@ -448,6 +461,67 @@ def auto_whales_worker():
             send_telegram(f"⚠️ Auto-Whales error: {e}")
         time.sleep(AUTO_WHALES_POLL_SEC)
 
+def momentum_pulse_worker():
+    sent = read_json(MOM_SENT_FILE, {"last_times": {}, "count": {}})
+    while True:
+        try:
+            today = _date_kw()
+            if sent.get("count", {}).get("date") != today:
+                sent["count"] = {"date": today, "n": 0}
+
+            if sent["count"]["n"] >= MAX_MOM_PER_DAY:
+                time.sleep(MOM_POLL_SEC)
+                continue
+
+            for sym in get_top_usdt_symbols():
+                df = compute_indicators(get_klines(sym, INTERVAL, LIMIT))
+                if df.empty or len(df) < 60:
+                    continue
+                last, prev = df.iloc[-1], df.iloc[-2]
+
+                # شروط الزخم:
+                if not (last["close"] > last["ema50"]):
+                    continue
+                if not (last["rsi"] >= MOM_RSI_MIN):
+                    continue
+                if not (last["macd_hist"] > 0 and last["macd_hist"] > prev["macd_hist"]):
+                    continue
+                if not (last["atr_pct"] >= (MIN_EXPECTED_MOVE_PCT / 2)):
+                    continue
+
+                # كول داون لكل زوج
+                last_times = sent.get("last_times", {})
+                last_ts = last_times.get(sym)
+                if last_ts:
+                    last_dt = datetime.datetime.fromisoformat(last_ts)
+                    if (_now_kw() - last_dt).total_seconds() < MOM_COOLDOWN_MIN * 60:
+                        continue
+
+                entry = float(last["close"])
+                tp    = round(entry * (1 + MIN_EXPECTED_MOVE_PCT/100.0), 8)
+                sl    = round(entry - (last["atr"] * SL_ATR_MULT), 8)
+
+                msg = (
+                    f"⚡️ *Momentum Pulse* — {sym}\n"
+                    f"• دخول: {entry}\n"
+                    f"• هدف (≈ +{MIN_EXPECTED_MOVE_PCT:.1f}%): {tp}\n"
+                    f"• وقف خسارة (ATR×{SL_ATR_MULT}): {sl}\n"
+                    f"• RSI: {last['rsi']:.1f} | MACD_hist: {last['macd_hist']:.4f}↑ | ATR%: {last['atr_pct']:.2f}%\n"
+                    f"• EMA50: {last['ema50']:.6f} | EMA200: {last['ema200']:.6f}"
+                )
+                send_telegram(msg)
+
+                last_times[sym] = _now_kw().isoformat(timespec="seconds")
+                sent["last_times"] = last_times
+                sent["count"]["n"] += 1
+                write_json(MOM_SENT_FILE, sent)
+
+                if sent["count"]["n"] >= MAX_MOM_PER_DAY:
+                    break
+        except Exception as e:
+            send_telegram(f"⚠️ Momentum error: {e}")
+        time.sleep(MOM_POLL_SEC)
+
 # ====== Main ======
 if __name__ == "__main__":
     require_env()
@@ -466,6 +540,8 @@ if __name__ == "__main__":
         threading.Thread(target=auto_sniper_worker, daemon=True).start()
     if AUTO_WHALES_ENABLED:
         threading.Thread(target=auto_whales_worker, daemon=True).start()
+    if MOMENTUM_ENABLED:
+        threading.Thread(target=momentum_pulse_worker, daemon=True).start()
 
     # إبقاء العملية حية
     while True:
