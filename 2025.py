@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# Trading Suite — Binance Daily Signal (+2%) + Sniper Alerts + Whales Alerts
+# Trading Suite — Binance Daily Signal (+2%) + Auto-Sniper + Auto-Whales
 # تنبيهات تيليجرام فقط (بدون ربط بمحفظة)
 
 import os, time, json, csv, hashlib, datetime
@@ -20,9 +20,25 @@ MIN_EXPECTED_MOVE_PCT = 2.0
 SL_ATR_MULT = 1.5
 MAX_CANDIDATES = 40
 
+# ====== Auto Mode (بدون إدخال يدوي) ======
+AUTO_SNIPER_ENABLED = True          # ماسح اختراقات تلقائي
+AUTO_WHALES_ENABLED = True          # إشارات حيتان تلقائية
+AUTO_SNIPER_POLL_SEC = 180          # كل كم ثانية يفحص
+AUTO_WHALES_POLL_SEC = 180
+AUTO_SNIPER_COOLDOWN_MIN = 45       # تهدئة لنفس الزوج (دقائق)
+AUTO_WHALES_COOLDOWN_MIN = 60
+MAX_AUTO_SNIPER_PER_DAY = 6         # حد أعلى يومي
+MAX_AUTO_WHALES_PER_DAY = 6
+SNIPER_SCORE_MIN = 4.0              # حد أدنى لسكور المرشح
+BREAKOUT_MIN_PCT = 1.0              # اختراق ≥ 1% فوق أعلى قمة 20 شمعة
+TAKER_BUY_RATIO_MIN = 0.62          # حيتان: نسبة شراء تاكر ≥ 62%
+DAY_CHANGE_MIN_PCT = 1.5            # حيتان: تغير يومي موجب ≥ 1.5%
+
+# ====== دورات عمل ======
 SNIPER_POLL_SEC = 90
 WHALES_POLL_SEC = 90
 
+# ====== مسارات وملفات ======
 DATA_DIR = "data"
 STATE_DIR = "state"
 os.makedirs(DATA_DIR, exist_ok=True)
@@ -32,8 +48,10 @@ SNIPER_FILE       = os.path.join(DATA_DIR, "manual_sniper.json")
 WHALES_FILE       = os.path.join(DATA_DIR, "whales_signals.csv")
 SNIPER_SENT_FILE  = os.path.join(STATE_DIR, "sniper_sent.json")
 WHALES_SEEN_FILE  = os.path.join(STATE_DIR, "whales_seen.json")
-STARTUP_SENT_FILE = os.path.join(STATE_DIR, "startup_sent.json")  # لمنع تكرار رسالة البدء
-STATUS_SENT_FILE  = os.path.join(STATE_DIR, "status_sent.json")   # لمنع تكرار رسالة “المنصة تعمل”
+STARTUP_SENT_FILE = os.path.join(STATE_DIR, "startup_sent.json")   # لمنع تكرار رسالة البدء
+STATUS_SENT_FILE  = os.path.join(STATE_DIR, "status_sent.json")    # لمنع تكرار “المنصة تعمل”
+AUTO_SNIPER_SENT_FILE = os.path.join(STATE_DIR, "auto_sniper_sent.json")
+AUTO_WHALES_SENT_FILE = os.path.join(STATE_DIR, "auto_whales_sent.json")
 
 # ====== إنشاء ملفات افتراضية (بدون أمثلة مزعجة) ======
 if not os.path.exists(SNIPER_FILE):
@@ -178,9 +196,26 @@ def _get_json(path, default):
 def _set_json(path, obj):
     with open(path,"w",encoding="utf-8") as f: json.dump(obj, f, ensure_ascii=False, indent=2)
 
-# ====== Workers ======
+def read_json(path, default):
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except:
+        return default
+
+def write_json(path, obj):
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(obj, f, ensure_ascii=False, indent=2)
+
+def _now_kw():
+    return datetime.datetime.utcnow() + datetime.timedelta(hours=3)
+
+def _date_kw():
+    return _now_kw().date().isoformat()
+
+# ====== العمال اليدويون (اختياري) ======
 def daily_worker():
-    # أرسل “المنصة تعمل” مرة واحدة يوميًا فقط
+    # “المنصة تعمل” مرة واحدة يوميًا
     today = datetime.date.today().isoformat()
     status_state = _get_json(STATUS_SENT_FILE, {})
     if status_state.get("date") != today:
@@ -267,6 +302,148 @@ def whales_worker():
         if tick % 20 == 0: valid = _valid_binance_symbols()
         time.sleep(WHALES_POLL_SEC)
 
+# ====== Auto Workers ======
+def breakout_signal(df: pd.DataFrame):
+    """اختراق بسيط فوق أعلى قمة 20 شمعة السابقة بنسبة BREAKOUT_MIN_PCT + فلاتر."""
+    if df.empty or len(df) < 60:
+        return None
+    last = df.iloc[-1]
+    prev20_high = df["high"].iloc[-21:-1].max()
+    if prev20_high <= 0:
+        return None
+    breakout_pct = (last["close"] - prev20_high) / prev20_high * 100.0
+    if breakout_pct < BREAKOUT_MIN_PCT:
+        return None
+    ok_trend = last["close"] > last["ema50"] > last["ema200"]
+    ok_momentum = (last["rsi"] >= 50) and (last["macd_hist"] > 0)
+    ok_volatility = last["atr_pct"] >= (MIN_EXPECTED_MOVE_PCT / 2)
+    score = 0.0
+    score += 2.0 if ok_trend else 0.0
+    score += 1.2 if ok_momentum else 0.0
+    score += 0.8 if ok_volatility else 0.0
+    score += min(1.5, breakout_pct / 1.0)
+    if score < SNIPER_SCORE_MIN:
+        return None
+    entry = float(last["close"])
+    tp    = round(entry * (1 + MIN_EXPECTED_MOVE_PCT/100.0), 8)
+    sl    = round(entry - (last["atr"] * SL_ATR_MULT), 8)
+    return {
+        "entry": entry, "tp": tp, "sl": sl,
+        "score": float(score), "breakout_pct": float(breakout_pct),
+        "rsi": float(last["rsi"]), "macd_hist": float(last["macd_hist"]),
+        "atr_pct": float(last["atr_pct"]), "ema50": float(last["ema50"]), "ema200": float(last["ema200"]),
+    }
+
+def auto_sniper_worker():
+    sent = read_json(AUTO_SNIPER_SENT_FILE, {"last_times": {}, "count": {}})
+    while True:
+        try:
+            today = _date_kw()
+            if sent.get("count", {}).get("date") != today:
+                sent["count"] = {"date": today, "n": 0}
+
+            if sent["count"]["n"] >= MAX_AUTO_SNIPER_PER_DAY:
+                time.sleep(AUTO_SNIPER_POLL_SEC)
+                continue
+
+            for sym in get_top_usdt_symbols():
+                df = compute_indicators(get_klines(sym, INTERVAL, LIMIT))
+                if df.empty:
+                    continue
+                sig = breakout_signal(df)
+                if not sig:
+                    continue
+
+                last_times = sent.get("last_times", {})
+                last_ts = last_times.get(sym)
+                if last_ts:
+                    last_dt = datetime.datetime.fromisoformat(last_ts)
+                    if (_now_kw() - last_dt).total_seconds() < AUTO_SNIPER_COOLDOWN_MIN * 60:
+                        continue
+
+                msg = (
+                    f"🎯 *Auto-Sniper Breakout* — {sym}\n"
+                    f"• دخول: {sig['entry']}\n"
+                    f"• هدف (≈ +{MIN_EXPECTED_MOVE_PCT:.1f}%): {sig['tp']}\n"
+                    f"• وقف خسارة (ATR×{SL_ATR_MULT}): {sig['sl']}\n"
+                    f"• اختراق: +{sig['breakout_pct']:.2f}% | Score: {sig['score']:.2f}\n"
+                    f"• RSI: {sig['rsi']:.1f} | MACD_hist: {sig['macd_hist']:.4f} | ATR%: {sig['atr_pct']:.2f}%\n"
+                    f"• EMA50: {sig['ema50']:.6f} | EMA200: {sig['ema200']:.6f}"
+                )
+                send_telegram(msg)
+
+                last_times[sym] = _now_kw().isoformat(timespec="seconds")
+                sent["last_times"] = last_times
+                sent["count"]["n"] += 1
+                write_json(AUTO_SNIPER_SENT_FILE, sent)
+
+                if sent["count"]["n"] >= MAX_AUTO_SNIPER_PER_DAY:
+                    break
+        except Exception as e:
+            send_telegram(f"⚠️ Auto-Sniper error: {e}")
+        time.sleep(AUTO_SNIPER_POLL_SEC)
+
+def auto_whales_worker():
+    sent = read_json(AUTO_WHALES_SENT_FILE, {"last_times": {}, "count": {}})
+    while True:
+        try:
+            today = _date_kw()
+            if sent.get("count", {}).get("date") != today:
+                sent["count"] = {"date": today, "n": 0}
+
+            if sent["count"]["n"] >= MAX_AUTO_WHALES_PER_DAY:
+                time.sleep(AUTO_WHALES_POLL_SEC)
+                continue
+
+            tickers = get_24h_tickers() or []
+            for d in tickers:
+                sym = (d.get("symbol") or "").upper()
+                if BASE_USDT and not sym.endswith("USDT"):
+                    continue
+                try:
+                    qv = float(d.get("quoteVolume", "0"))
+                    day_chg = float(d.get("priceChangePercent", "0"))
+                    tbb = float(d.get("takerBuyBaseAssetVolume", "0"))
+                    base_vol = float(d.get("volume", "0"))
+                except:
+                    continue
+                if qv < MIN_24H_VOLUME_USDT:
+                    continue
+                if day_chg < DAY_CHANGE_MIN_PCT:
+                    continue
+                if base_vol <= 0:
+                    continue
+                taker_buy_ratio = (tbb / base_vol) if base_vol > 0 else 0.0
+                if taker_buy_ratio < TAKER_BUY_RATIO_MIN:
+                    continue
+
+                last_times = sent.get("last_times", {})
+                last_ts = last_times.get(sym)
+                if last_ts:
+                    last_dt = datetime.datetime.fromisoformat(last_ts)
+                    if (_now_kw() - last_dt).total_seconds() < AUTO_WHALES_COOLDOWN_MIN * 60:
+                        continue
+
+                msg = (
+                    f"🐋 *Auto-Whales Signal* — {sym}\n"
+                    f"• تغير يومي: +{day_chg:.2f}%\n"
+                    f"• سيولة 24h (Quote): {qv:,.0f} USDT\n"
+                    f"• Taker Buy Ratio: {taker_buy_ratio*100:.1f}%\n"
+                    f"• ملاحظة: نشاط شراء تاكر مرتفع مع سيولة كبيرة"
+                )
+                send_telegram(msg)
+
+                last_times[sym] = _now_kw().isoformat(timespec="seconds")
+                sent["last_times"] = last_times
+                sent["count"]["n"] += 1
+                write_json(AUTO_WHALES_SENT_FILE, sent)
+
+                if sent["count"]["n"] >= MAX_AUTO_WHALES_PER_DAY:
+                    break
+        except Exception as e:
+            send_telegram(f"⚠️ Auto-Whales error: {e}")
+        time.sleep(AUTO_WHALES_POLL_SEC)
+
 # ====== Main ======
 if __name__ == "__main__":
     require_env()
@@ -280,8 +457,12 @@ if __name__ == "__main__":
         _set_json(STARTUP_SENT_FILE, {"date": today})
 
     import threading
-    threading.Thread(target=daily_worker,  daemon=True).start()
-    threading.Thread(target=sniper_worker, daemon=True).start()
-    threading.Thread(target=whales_worker, daemon=True).start()
+    threading.Thread(target=daily_worker,      daemon=True).start()
+    if AUTO_SNIPER_ENABLED:
+        threading.Thread(target=auto_sniper_worker,  daemon=True).start()
+    if AUTO_WHALES_ENABLED:
+        threading.Thread(target=auto_whales_worker,  daemon=True).start()
+
+    # أبقي العملية حية
     while True:
         time.sleep(3600)
