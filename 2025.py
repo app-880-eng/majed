@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # Trading Suite — Binance Daily Signal (+2%) + Sniper Alerts + Whales Alerts
-# بدون أي ربط بمحفظة — كله تنبيهات فقط على تيليجرام
+# تنبيهات تيليجرام فقط (بدون ربط بمحفظة)
 
 import os, time, json, csv, hashlib, datetime
 import requests
@@ -15,10 +15,11 @@ BASE_USDT = True
 MIN_24H_VOLUME_USDT = 5_000_000
 INTERVAL = "5m"
 LIMIT = 600
-DAILY_SIGNAL_HOUR_LOCAL = 10
+DAILY_SIGNAL_HOUR_LOCAL = 10   # توقيت الكويت (UTC+3)
 MIN_EXPECTED_MOVE_PCT = 2.0
 SL_ATR_MULT = 1.5
 MAX_CANDIDATES = 40
+
 SNIPER_POLL_SEC = 90
 WHALES_POLL_SEC = 90
 
@@ -27,29 +28,27 @@ STATE_DIR = "state"
 os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(STATE_DIR, exist_ok=True)
 
-SNIPER_FILE = os.path.join(DATA_DIR, "manual_sniper.json")
-WHALES_FILE = os.path.join(DATA_DIR, "whales_signals.csv")
-TAG_DAILY_FILE = os.path.join(STATE_DIR, "daily_tag.json")
-SNIPER_SENT_FILE = os.path.join(STATE_DIR, "sniper_sent.json")
-WHALES_SEEN_FILE = os.path.join(STATE_DIR, "whales_seen.json")
+SNIPER_FILE       = os.path.join(DATA_DIR, "manual_sniper.json")
+WHALES_FILE       = os.path.join(DATA_DIR, "whales_signals.csv")
+SNIPER_SENT_FILE  = os.path.join(STATE_DIR, "sniper_sent.json")
+WHALES_SEEN_FILE  = os.path.join(STATE_DIR, "whales_seen.json")
+STARTUP_SENT_FILE = os.path.join(STATE_DIR, "startup_sent.json")  # لمنع تكرار رسالة البدء
+STATUS_SENT_FILE  = os.path.join(STATE_DIR, "status_sent.json")   # لمنع تكرار رسالة “المنصة تعمل”
 
-# ملفات مثال تلقائية إذا مفقودة
+# ====== إنشاء ملفات افتراضية (بدون أمثلة مزعجة) ======
 if not os.path.exists(SNIPER_FILE):
     with open(SNIPER_FILE, "w", encoding="utf-8") as f:
-        json.dump([{"symbol":"BTCUSDT","note":"Example only","when": datetime.date.today().isoformat()}], f, ensure_ascii=False, indent=2)
+        json.dump([], f, ensure_ascii=False, indent=2)
 if not os.path.exists(WHALES_FILE):
     with open(WHALES_FILE, "w", encoding="utf-8", newline="") as f:
-        w = csv.writer(f)
-        w.writerow(["date","symbol","side","confidence","source","note"])
-        w.writerow([datetime.date.today().isoformat(),"BTCUSDT","BUY","0.8","Example","Address X accumulated 200 BTC"])
+        csv.writer(f).writerow(["date","symbol","side","confidence","source","note"])
 
-# ====== فحص المتغيرات ======
+# ====== فحص التكوين ======
 def require_env():
-    missing = []
-    if not TELEGRAM_TOKEN or "PUT_" in TELEGRAM_TOKEN: missing.append("TELEGRAM_TOKEN")
-    if not TELEGRAM_CHAT_ID or "PUT_" in TELEGRAM_CHAT_ID: missing.append("TELEGRAM_CHAT_ID")
-    if missing:
-        raise RuntimeError(f"Missing required env: {', '.join(missing)}")
+    miss=[]
+    if not TELEGRAM_TOKEN or "PUT_" in TELEGRAM_TOKEN: miss.append("TELEGRAM_TOKEN")
+    if not TELEGRAM_CHAT_ID or "PUT_" in TELEGRAM_CHAT_ID: miss.append("TELEGRAM_CHAT_ID")
+    if miss: raise RuntimeError("Missing required env: " + ", ".join(miss))
 
 # ====== تيليجرام ======
 def send_telegram(text: str):
@@ -83,18 +82,21 @@ def get_klines(symbol: str, interval: str, limit: int) -> pd.DataFrame:
 def compute_indicators(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty: return df
     close = df["close"]
-    df["ema50"] = close.ewm(span=50, adjust=False).mean()
+    df["ema50"] = close.ewm(span=50,  adjust=False).mean()
     df["ema200"] = close.ewm(span=200, adjust=False).mean()
+
     delta = close.diff()
     gain = (delta.where(delta > 0, 0)).ewm(alpha=1/14, adjust=False).mean()
     loss = (-delta.where(delta < 0, 0)).ewm(alpha=1/14, adjust=False).mean()
     rs = gain / (loss + 1e-12)
     df["rsi"] = 100 - (100 / (1 + rs))
+
     ema12 = close.ewm(span=12, adjust=False).mean()
     ema26 = close.ewm(span=26, adjust=False).mean()
-    df["macd"] = ema12 - ema26
+    df["macd"]        = ema12 - ema26
     df["macd_signal"] = df["macd"].ewm(span=9, adjust=False).mean()
-    df["macd_hist"] = df["macd"] - df["macd_signal"]
+    df["macd_hist"]   = df["macd"] - df["macd_signal"]
+
     obv = [0.0]
     for i in range(1, len(df)):
         if df.loc[i,"close"] > df.loc[i-1,"close"]: obv.append(obv[-1] + df.loc[i,"volume"])
@@ -102,6 +104,7 @@ def compute_indicators(df: pd.DataFrame) -> pd.DataFrame:
         else: obv.append(obv[-1])
     df["obv"] = obv
     df["obv_slope"] = df["obv"].diff().rolling(10).mean()
+
     high, low, prev_close = df["high"], df["low"], df["close"].shift(1)
     tr = pd.concat([(high-low),(high-prev_close).abs(),(low-prev_close).abs()], axis=1).max(axis=1)
     df["atr"] = tr.rolling(14).mean()
@@ -109,13 +112,13 @@ def compute_indicators(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 def get_top_usdt_symbols():
-    rows = []
+    rows=[]
     for d in get_24h_tickers():
         s = d.get("symbol","")
         if BASE_USDT and not s.endswith("USDT"): continue
-        try: quote_vol = float(d.get("quoteVolume","0"))
+        try: qv = float(d.get("quoteVolume","0"))
         except: continue
-        rows.append((s, quote_vol))
+        rows.append((s, qv))
     rows.sort(key=lambda x: x[1], reverse=True)
     return [s for s,v in rows if v >= MIN_24H_VOLUME_USDT][:max(MAX_CANDIDATES,1)]
 
@@ -136,7 +139,7 @@ def candidate_score(df: pd.DataFrame) -> float:
     return float(score)
 
 def pick_best_signal():
-    ranked = []
+    ranked=[]
     for s in get_top_usdt_symbols():
         df = get_klines(s, INTERVAL, LIMIT)
         if df.empty: continue
@@ -145,10 +148,10 @@ def pick_best_signal():
     if not ranked: return None
     ranked.sort(key=lambda x: x[0], reverse=True)
     sc, sym, df = ranked[0]
-    last = df.iloc[-1]
+    last  = df.iloc[-1]
     entry = float(last["close"])
-    tp = round(entry * (1 + MIN_EXPECTED_MOVE_PCT/100.0), 8)
-    sl = round(entry - (last["atr"] * SL_ATR_MULT), 8)
+    tp    = round(entry * (1 + MIN_EXPECTED_MOVE_PCT/100.0), 8)
+    sl    = round(entry - (last["atr"] * SL_ATR_MULT), 8)
     return {
         "symbol": sym, "score": sc, "entry": entry, "tp": tp, "sl": sl,
         "rsi": float(last["rsi"]), "macd_hist": float(last["macd_hist"]),
@@ -167,7 +170,7 @@ def compose_daily_msg(sig: dict) -> str:
         "ملاحظة: هذه توصية تحليل وليست أمرًا ماليًا."
     )
 
-# ====== Helpers ======
+# ====== Helpers (state I/O) ======
 def _get_json(path, default):
     try:
         with open(path,"r",encoding="utf-8") as f: return json.load(f)
@@ -177,7 +180,13 @@ def _set_json(path, obj):
 
 # ====== Workers ======
 def daily_worker():
-    send_telegram("✅ المنصة تعمل — (Daily + Sniper + Whales) | تنبيهات فقط.")
+    # أرسل “المنصة تعمل” مرة واحدة يوميًا فقط
+    today = datetime.date.today().isoformat()
+    status_state = _get_json(STATUS_SENT_FILE, {})
+    if status_state.get("date") != today:
+        send_telegram("✅ المنصة تعمل — (Daily + Sniper + Whales) | تنبيهات فقط.")
+        _set_json(STATUS_SENT_FILE, {"date": today})
+
     last_sent_date = None
     while True:
         now_utc = datetime.datetime.utcnow()
@@ -218,7 +227,7 @@ def sniper_worker():
         time.sleep(SNIPER_POLL_SEC)
 
 def _valid_binance_symbols():
-    syms = set()
+    syms=set()
     for d in get_24h_tickers():
         s = d.get("symbol","").upper()
         if BASE_USDT and not s.endswith("USDT"): continue
@@ -226,7 +235,7 @@ def _valid_binance_symbols():
     return syms
 
 def whales_worker():
-    seen = _get_json(WHALES_SEEN_FILE, {})
+    seen  = _get_json(WHALES_SEEN_FILE, {})
     valid = _valid_binance_symbols()
     tick = 0
     while True:
@@ -246,7 +255,10 @@ def whales_worker():
                         key = hashlib.md5(f"{date}|{symbol}|{side}|{note}".encode()).hexdigest()
                         if seen.get(key): continue
                         seen[key] = True
-                        send_telegram(f"🐋 *Whale Signal* — {symbol}\n• التاريخ: {date}\n• العملية: {side}\n• الوثوق: {conf}\n• المصدر: {source}\n• ملاحظة: {note}")
+                        send_telegram(
+                            f"🐋 *Whale Signal* — {symbol}\n"
+                            f"• التاريخ: {date}\n• العملية: {side}\n• الوثوق: {conf}\n• المصدر: {source}\n• ملاحظة: {note}"
+                        )
                 _set_json(WHALES_SEEN_FILE, seen)
         except Exception as e:
             send_telegram(f"⚠️ Whales error: {e}")
@@ -259,9 +271,16 @@ def whales_worker():
 if __name__ == "__main__":
     require_env()
     print("✅ Worker starting…", flush=True)
-    send_telegram("✅ البوت بدأ العمل على Render (Worker).")
+
+    # رسالة البدء: مرة واحدة يوميًا فقط
+    today = datetime.date.today().isoformat()
+    startup_state = _get_json(STARTUP_SENT_FILE, {})
+    if startup_state.get("date") != today:
+        send_telegram("✅ البوت بدأ العمل على Render (Worker).")
+        _set_json(STARTUP_SENT_FILE, {"date": today})
+
     import threading
-    threading.Thread(target=daily_worker, daemon=True).start()
+    threading.Thread(target=daily_worker,  daemon=True).start()
     threading.Thread(target=sniper_worker, daemon=True).start()
     threading.Thread(target=whales_worker, daemon=True).start()
     while True:
