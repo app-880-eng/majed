@@ -24,19 +24,19 @@ MAX_CANDIDATES = 60
 
 # ====== Auto-Sniper (اختراقات) ======
 AUTO_SNIPER_ENABLED = True
-AUTO_SNIPER_POLL_SEC = 90        # كان 180
-AUTO_SNIPER_COOLDOWN_MIN = 25    # كان 45
-MAX_AUTO_SNIPER_PER_DAY = 12     # كان 6
-SNIPER_SCORE_MIN = 3.0           # كان 4.0 أسهل
-BREAKOUT_MIN_PCT = 0.5           # كان 1.0
+AUTO_SNIPER_POLL_SEC = 90
+AUTO_SNIPER_COOLDOWN_MIN = 25
+MAX_AUTO_SNIPER_PER_DAY = 12
+SNIPER_SCORE_MIN = 3.0
+BREAKOUT_MIN_PCT = 0.5
 
 # ====== Auto-Whales (نشاط تاكر شراء مع سيولة) ======
 AUTO_WHALES_ENABLED = True
-AUTO_WHALES_POLL_SEC = 120       # كان 180
-AUTO_WHALES_COOLDOWN_MIN = 40    # كان 60
-MAX_AUTO_WHALES_PER_DAY = 10     # كان 6
-TAKER_BUY_RATIO_MIN = 0.58       # كان 0.62
-DAY_CHANGE_MIN_PCT = 1.0         # كان 1.5
+AUTO_WHALES_POLL_SEC = 120
+AUTO_WHALES_COOLDOWN_MIN = 40
+MAX_AUTO_WHALES_PER_DAY = 10
+TAKER_BUY_RATIO_MIN = 0.58
+DAY_CHANGE_MIN_PCT = 1.0
 
 # ====== Momentum Pulse (إشارات زخم) ======
 MOMENTUM_ENABLED = True
@@ -81,21 +81,33 @@ def require_env():
     if not TELEGRAM_CHAT_ID or "PUT_" in TELEGRAM_CHAT_ID: miss.append("TELEGRAM_CHAT_ID")
     if miss: raise RuntimeError("Missing required env: " + ", ".join(miss))
 
-# ====== تيليجرام ======
-def send_telegram(text: str):
-    try:
-        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-        requests.post(url, data={"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "Markdown"}, timeout=15)
-    except Exception as e:
-        print(f"Telegram error: {e}", flush=True)
+# ====== Binance (مع تعدد الدومينات + بروكسي اختياري) ======
+API_BASES = [
+    "https://api.binance.me",      # بديل شائع لما يكون api.binance.com محجوب
+    "https://api1.binance.com",
+    "https://api2.binance.com",
+    "https://api3.binance.com",
+    "https://api.binance.com",
+]
+PROXY_URL = os.environ.get("PROXY_URL", "").strip()
+PROXIES = {"http": PROXY_URL, "https": PROXY_URL} if PROXY_URL else None
 
-# ====== Binance ======
 def bget(path, params=None):
-    try:
-        r = requests.get(f"https://api.binance.com{path}", params=params, timeout=20)
-        r.raise_for_status(); return r.json()
-    except Exception as e:
-        print(f"Binance error: {e}", flush=True); return None
+    last_err = None
+    for base in API_BASES:
+        try:
+            r = requests.get(f"{base}{path}", params=params, timeout=20, proxies=PROXIES)
+            # لو العقدة رجعت 451 (حجب)، جرّب العقدة التالية
+            if r.status_code == 451:
+                last_err = f"451 from {base}"
+                continue
+            r.raise_for_status()
+            return r.json()
+        except Exception as e:
+            last_err = str(e)
+            continue
+    print(f"Binance error: {last_err}", flush=True)
+    return None
 
 def get_24h_tickers():
     return bget("/api/v3/ticker/24hr") or []
@@ -479,7 +491,6 @@ def momentum_pulse_worker():
                     continue
                 last, prev = df.iloc[-1], df.iloc[-2]
 
-                # شروط الزخم:
                 if not (last["close"] > last["ema50"]):
                     continue
                 if not (last["rsi"] >= MOM_RSI_MIN):
@@ -489,7 +500,6 @@ def momentum_pulse_worker():
                 if not (last["atr_pct"] >= (MIN_EXPECTED_MOVE_PCT / 2)):
                     continue
 
-                # كول داون لكل زوج
                 last_times = sent.get("last_times", {})
                 last_ts = last_times.get(sym)
                 if last_ts:
