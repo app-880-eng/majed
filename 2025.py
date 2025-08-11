@@ -21,20 +21,20 @@ SL_ATR_MULT = 1.5
 MAX_CANDIDATES = 40
 
 # ====== Auto Mode (بدون إدخال يدوي) ======
-AUTO_SNIPER_ENABLED = True          # ماسح اختراقات تلقائي
-AUTO_WHALES_ENABLED = True          # إشارات حيتان تلقائية
-AUTO_SNIPER_POLL_SEC = 180          # كل كم ثانية يفحص
+AUTO_SNIPER_ENABLED = True
+AUTO_WHALES_ENABLED = True
+AUTO_SNIPER_POLL_SEC = 180
 AUTO_WHALES_POLL_SEC = 180
-AUTO_SNIPER_COOLDOWN_MIN = 45       # تهدئة لنفس الزوج (دقائق)
+AUTO_SNIPER_COOLDOWN_MIN = 45
 AUTO_WHALES_COOLDOWN_MIN = 60
-MAX_AUTO_SNIPER_PER_DAY = 6         # حد أعلى يومي
+MAX_AUTO_SNIPER_PER_DAY = 6
 MAX_AUTO_WHALES_PER_DAY = 6
-SNIPER_SCORE_MIN = 4.0              # حد أدنى لسكور المرشح
-BREAKOUT_MIN_PCT = 1.0              # اختراق ≥ 1% فوق أعلى قمة 20 شمعة
-TAKER_BUY_RATIO_MIN = 0.62          # حيتان: نسبة شراء تاكر ≥ 62%
-DAY_CHANGE_MIN_PCT = 1.5            # حيتان: تغير يومي موجب ≥ 1.5%
+SNIPER_SCORE_MIN = 4.0
+BREAKOUT_MIN_PCT = 1.0
+TAKER_BUY_RATIO_MIN = 0.62
+DAY_CHANGE_MIN_PCT = 1.5
 
-# ====== دورات عمل ======
+# ====== دورات عمل (للعمّال اليدويين إن أبقيتها) ======
 SNIPER_POLL_SEC = 90
 WHALES_POLL_SEC = 90
 
@@ -48,8 +48,8 @@ SNIPER_FILE       = os.path.join(DATA_DIR, "manual_sniper.json")
 WHALES_FILE       = os.path.join(DATA_DIR, "whales_signals.csv")
 SNIPER_SENT_FILE  = os.path.join(STATE_DIR, "sniper_sent.json")
 WHALES_SEEN_FILE  = os.path.join(STATE_DIR, "whales_seen.json")
-STARTUP_SENT_FILE = os.path.join(STATE_DIR, "startup_sent.json")   # لمنع تكرار رسالة البدء
-STATUS_SENT_FILE  = os.path.join(STATE_DIR, "status_sent.json")    # لمنع تكرار “المنصة تعمل”
+STARTUP_SENT_FILE = os.path.join(STATE_DIR, "startup_sent.json")   # منع تكرار رسالة البدء يوميًا
+STATUS_SENT_FILE  = os.path.join(STATE_DIR, "status_sent.json")    # منع تكرار “المنصة تعمل” يوميًا
 AUTO_SNIPER_SENT_FILE = os.path.join(STATE_DIR, "auto_sniper_sent.json")
 AUTO_WHALES_SENT_FILE = os.path.join(STATE_DIR, "auto_whales_sent.json")
 
@@ -343,7 +343,7 @@ def auto_sniper_worker():
                 sent["count"] = {"date": today, "n": 0}
 
             if sent["count"]["n"] >= MAX_AUTO_SNIPER_PER_DAY:
-                time.sleep(AUTO_SNIPER_POLL_SEC)
+                time.sleep(AUTO_SNIPER_POLL_SEC); 
                 continue
 
             for sym in get_top_usdt_symbols():
@@ -457,12 +457,12 @@ if __name__ == "__main__":
         _set_json(STARTUP_SENT_FILE, {"date": today})
 
     import threading
-    threading.Thread(target=daily_worker,      daemon=True).start()
+    threading.Thread(target=daily_worker, daemon=True).start()
     if AUTO_SNIPER_ENABLED:
-        threading.Thread(target=auto_sniper_worker,  daemon=True).start()
+        threading.Thread(target=auto_sniper_worker, daemon=True).start()
     if AUTO_WHALES_ENABLED:
-        threading.Thread(target=auto_whales_worker,  daemon=True).start()
+        threading.Thread(target=auto_whales_worker, daemon=True).start()
 
-    # أبقي العملية حية
+    # إبقاء العملية حية
     while True:
         time.sleep(3600)
