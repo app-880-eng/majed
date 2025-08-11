@@ -10,6 +10,19 @@ import pandas as pd
 TELEGRAM_TOKEN = "8295831234:AAHgdvWal7E_5_hsjPmbPiIEra4LBDRjbgU"
 TELEGRAM_CHAT_ID = "1820224574"
 
+# ====== إرسال تيليجرام ======
+def send_telegram(text: str):
+    """إرسال رسالة نصية إلى تيليجرام"""
+    try:
+        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+        requests.post(
+            url,
+            data={"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "Markdown"},
+            timeout=15,
+        )
+    except Exception as e:
+        print(f"Telegram error: {e}", flush=True)
+
 # ====== إعدادات التداول العامة ======
 BASE_USDT = True
 MIN_24H_VOLUME_USDT = 5_000_000
@@ -19,7 +32,7 @@ DAILY_SIGNAL_HOUR_LOCAL = 10   # توقيت الكويت (UTC+3)
 MIN_EXPECTED_MOVE_PCT = 2.0
 SL_ATR_MULT = 1.5
 
-# Aggressive: فحص رموز أكثر لفرص أكثر
+# Aggressive
 MAX_CANDIDATES = 60
 
 # ====== Auto-Sniper (اختراقات) ======
@@ -30,7 +43,7 @@ MAX_AUTO_SNIPER_PER_DAY = 12
 SNIPER_SCORE_MIN = 3.0
 BREAKOUT_MIN_PCT = 0.5
 
-# ====== Auto-Whales (نشاط تاكر شراء مع سيولة) ======
+# ====== Auto-Whales ======
 AUTO_WHALES_ENABLED = True
 AUTO_WHALES_POLL_SEC = 120
 AUTO_WHALES_COOLDOWN_MIN = 40
@@ -38,14 +51,14 @@ MAX_AUTO_WHALES_PER_DAY = 10
 TAKER_BUY_RATIO_MIN = 0.58
 DAY_CHANGE_MIN_PCT = 1.0
 
-# ====== Momentum Pulse (إشارات زخم) ======
+# ====== Momentum Pulse ======
 MOMENTUM_ENABLED = True
 MOM_POLL_SEC = 120
 MOM_COOLDOWN_MIN = 30
 MAX_MOM_PER_DAY = 12
 MOM_RSI_MIN = 55
 
-# ====== دورات عمل (لليدويين إذا فعّلتهم) ======
+# ====== دورات عمل لليدويين إذا فعّلتهم ======
 SNIPER_POLL_SEC = 90
 WHALES_POLL_SEC = 90
 
@@ -59,9 +72,8 @@ SNIPER_FILE       = os.path.join(DATA_DIR, "manual_sniper.json")
 WHALES_FILE       = os.path.join(DATA_DIR, "whales_signals.csv")
 SNIPER_SENT_FILE  = os.path.join(STATE_DIR, "sniper_sent.json")
 WHALES_SEEN_FILE  = os.path.join(STATE_DIR, "whales_seen.json")
-
-STARTUP_SENT_FILE = os.path.join(STATE_DIR, "startup_sent.json")   # رسالة البدء يوميًا لمرة واحدة
-STATUS_SENT_FILE  = os.path.join(STATE_DIR, "status_sent.json")    # “المنصة تعمل” يوميًا لمرة واحدة
+STARTUP_SENT_FILE = os.path.join(STATE_DIR, "startup_sent.json")
+STATUS_SENT_FILE  = os.path.join(STATE_DIR, "status_sent.json")
 AUTO_SNIPER_SENT_FILE = os.path.join(STATE_DIR, "auto_sniper_sent.json")
 AUTO_WHALES_SENT_FILE = os.path.join(STATE_DIR, "auto_whales_sent.json")
 MOM_SENT_FILE = os.path.join(STATE_DIR, "momentum_sent.json")
@@ -81,9 +93,9 @@ def require_env():
     if not TELEGRAM_CHAT_ID or "PUT_" in TELEGRAM_CHAT_ID: miss.append("TELEGRAM_CHAT_ID")
     if miss: raise RuntimeError("Missing required env: " + ", ".join(miss))
 
-# ====== Binance (مع تعدد الدومينات + بروكسي اختياري) ======
+# ====== Binance (تجريب عدة نودز + بروكسي اختياري) ======
 API_BASES = [
-    "https://api.binance.me",      # بديل شائع لما يكون api.binance.com محجوب
+    "https://api.binance.me",
     "https://api1.binance.com",
     "https://api2.binance.com",
     "https://api3.binance.com",
@@ -97,8 +109,7 @@ def bget(path, params=None):
     for base in API_BASES:
         try:
             r = requests.get(f"{base}{path}", params=params, timeout=20, proxies=PROXIES)
-            # لو العقدة رجعت 451 (حجب)، جرّب العقدة التالية
-            if r.status_code == 451:
+            if r.status_code == 451:  # محجوب
                 last_err = f"451 from {base}"
                 continue
             r.raise_for_status()
@@ -213,7 +224,7 @@ def compose_daily_msg(sig: dict) -> str:
         "ملاحظة: هذه توصية تحليل وليست أمرًا ماليًا."
     )
 
-# ====== Helpers (state I/O) ======
+# ====== Helpers ======
 def _get_json(path, default):
     try:
         with open(path,"r",encoding="utf-8") as f: return json.load(f)
@@ -333,7 +344,6 @@ def whales_worker():
 
 # ====== Auto Workers ======
 def breakout_signal(df: pd.DataFrame):
-    """اختراق بسيط فوق أعلى قمة 20 شمعة السابقة بنسبة BREAKOUT_MIN_PCT + فلاتر."""
     if df.empty or len(df) < 60:
         return None
     last = df.iloc[-1]
