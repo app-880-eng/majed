@@ -10,16 +10,11 @@ import pandas as pd
 TELEGRAM_TOKEN = "8295831234:AAHgdvWal7E_5_hsjPmbPiIEra4LBDRjbgU"
 TELEGRAM_CHAT_ID = "1820224574"
 
-# ====== إرسال تيليجرام ======
 def send_telegram(text: str):
     """إرسال رسالة نصية إلى تيليجرام"""
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-        requests.post(
-            url,
-            data={"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "Markdown"},
-            timeout=15,
-        )
+        requests.post(url, data={"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "Markdown"}, timeout=15)
     except Exception as e:
         print(f"Telegram error: {e}", flush=True)
 
@@ -77,6 +72,7 @@ STATUS_SENT_FILE  = os.path.join(STATE_DIR, "status_sent.json")
 AUTO_SNIPER_SENT_FILE = os.path.join(STATE_DIR, "auto_sniper_sent.json")
 AUTO_WHALES_SENT_FILE = os.path.join(STATE_DIR, "auto_whales_sent.json")
 MOM_SENT_FILE = os.path.join(STATE_DIR, "momentum_sent.json")
+NET_STATUS_FILE = os.path.join(STATE_DIR, "net_status.json")  # تنبيه فشل الشبكة
 
 # ====== إنشاء ملفات افتراضية ======
 if not os.path.exists(SNIPER_FILE):
@@ -93,7 +89,7 @@ def require_env():
     if not TELEGRAM_CHAT_ID or "PUT_" in TELEGRAM_CHAT_ID: miss.append("TELEGRAM_CHAT_ID")
     if miss: raise RuntimeError("Missing required env: " + ", ".join(miss))
 
-# ====== Binance (تجريب عدة نودز + بروكسي اختياري) ======
+# ====== Binance (تجريب عدة نودز + بروكسي اختياري + تنبيه فشل) ======
 API_BASES = [
     "https://api.binance.me",
     "https://api1.binance.com",
@@ -104,20 +100,59 @@ API_BASES = [
 PROXY_URL = os.environ.get("PROXY_URL", "").strip()
 PROXIES = {"http": PROXY_URL, "https": PROXY_URL} if PROXY_URL else None
 
+def _read(path, default):
+    try:
+        with open(path, "r", encoding="utf-8") as f: return json.load(f)
+    except: return default
+
+def _write(path, obj):
+    with open(path, "w", encoding="utf-8") as f: json.dump(obj, f, ensure_ascii=False, indent=2)
+
+def _now_kw():
+    return datetime.datetime.utcnow() + datetime.timedelta(hours=3)
+
+def _date_kw():
+    return _now_kw().date().isoformat()
+
+def _alert_network_failure(last_err: str):
+    """يرسل تنبيه فشل Binance مرة كل ساعة فقط."""
+    st = _read(NET_STATUS_FILE, {"last_alert": "1970-01-01T00:00:00", "last_ok": None})
+    try:
+        last_alert = datetime.datetime.fromisoformat(st.get("last_alert", "1970-01-01T00:00:00"))
+    except:
+        last_alert = datetime.datetime(1970,1,1)
+    if (_now_kw() - last_alert).total_seconds() >= 3600:
+        msg = "⚠️ تعذّر الاتصال ببيانات Binance.\n"
+        if PROXY_URL:
+            msg += f"• Proxy: مفعل\n"
+        else:
+            msg += f"• Proxy: غير مفعل — يُنصح بإضافة متغير PROXY_URL في Render.\n"
+        msg += f"• آخر خطأ: {last_err}"
+        send_telegram(msg)
+        st["last_alert"] = _now_kw().isoformat(timespec="seconds")
+        _write(NET_STATUS_FILE, st)
+
+def _note_network_ok():
+    st = _read(NET_STATUS_FILE, {"last_alert": "1970-01-01T00:00:00", "last_ok": None})
+    st["last_ok"] = _now_kw().isoformat(timespec="seconds")
+    _write(NET_STATUS_FILE, st)
+
 def bget(path, params=None):
     last_err = None
     for base in API_BASES:
         try:
             r = requests.get(f"{base}{path}", params=params, timeout=20, proxies=PROXIES)
-            if r.status_code == 451:  # محجوب
+            if r.status_code == 451:
                 last_err = f"451 from {base}"
                 continue
             r.raise_for_status()
+            _note_network_ok()
             return r.json()
         except Exception as e:
             last_err = str(e)
             continue
     print(f"Binance error: {last_err}", flush=True)
+    _alert_network_failure(last_err or "Unknown error")
     return None
 
 def get_24h_tickers():
@@ -224,7 +259,7 @@ def compose_daily_msg(sig: dict) -> str:
         "ملاحظة: هذه توصية تحليل وليست أمرًا ماليًا."
     )
 
-# ====== Helpers ======
+# ====== Helpers (state I/O) ======
 def _get_json(path, default):
     try:
         with open(path,"r",encoding="utf-8") as f: return json.load(f)
@@ -242,12 +277,6 @@ def read_json(path, default):
 def write_json(path, obj):
     with open(path, "w", encoding="utf-8") as f:
         json.dump(obj, f, ensure_ascii=False, indent=2)
-
-def _now_kw():
-    return datetime.datetime.utcnow() + datetime.timedelta(hours=3)
-
-def _date_kw():
-    return _now_kw().date().isoformat()
 
 # ====== العمال اليدويون (اختياري) ======
 def daily_worker():
@@ -380,18 +409,14 @@ def auto_sniper_worker():
             today = _date_kw()
             if sent.get("count", {}).get("date") != today:
                 sent["count"] = {"date": today, "n": 0}
-
             if sent["count"]["n"] >= MAX_AUTO_SNIPER_PER_DAY:
-                time.sleep(AUTO_SNIPER_POLL_SEC)
-                continue
+                time.sleep(AUTO_SNIPER_POLL_SEC); continue
 
             for sym in get_top_usdt_symbols():
                 df = compute_indicators(get_klines(sym, INTERVAL, LIMIT))
-                if df.empty:
-                    continue
+                if df.empty: continue
                 sig = breakout_signal(df)
-                if not sig:
-                    continue
+                if not sig: continue
 
                 last_times = sent.get("last_times", {})
                 last_ts = last_times.get(sym)
@@ -416,8 +441,7 @@ def auto_sniper_worker():
                 sent["count"]["n"] += 1
                 write_json(AUTO_SNIPER_SENT_FILE, sent)
 
-                if sent["count"]["n"] >= MAX_AUTO_SNIPER_PER_DAY:
-                    break
+                if sent["count"]["n"] >= MAX_AUTO_SNIPER_PER_DAY: break
         except Exception as e:
             send_telegram(f"⚠️ Auto-Sniper error: {e}")
         time.sleep(AUTO_SNIPER_POLL_SEC)
@@ -429,32 +453,24 @@ def auto_whales_worker():
             today = _date_kw()
             if sent.get("count", {}).get("date") != today:
                 sent["count"] = {"date": today, "n": 0}
-
             if sent["count"]["n"] >= MAX_AUTO_WHALES_PER_DAY:
-                time.sleep(AUTO_WHALES_POLL_SEC)
-                continue
+                time.sleep(AUTO_WHALES_POLL_SEC); continue
 
             tickers = get_24h_tickers() or []
             for d in tickers:
                 sym = (d.get("symbol") or "").upper()
-                if BASE_USDT and not sym.endswith("USDT"):
-                    continue
+                if BASE_USDT and not sym.endswith("USDT"): continue
                 try:
                     qv = float(d.get("quoteVolume", "0"))
                     day_chg = float(d.get("priceChangePercent", "0"))
                     tbb = float(d.get("takerBuyBaseAssetVolume", "0"))
                     base_vol = float(d.get("volume", "0"))
-                except:
-                    continue
-                if qv < MIN_24H_VOLUME_USDT:
-                    continue
-                if day_chg < DAY_CHANGE_MIN_PCT:
-                    continue
-                if base_vol <= 0:
-                    continue
+                except: continue
+                if qv < MIN_24H_VOLUME_USDT: continue
+                if day_chg < DAY_CHANGE_MIN_PCT: continue
+                if base_vol <= 0: continue
                 taker_buy_ratio = (tbb / base_vol) if base_vol > 0 else 0.0
-                if taker_buy_ratio < TAKER_BUY_RATIO_MIN:
-                    continue
+                if taker_buy_ratio < TAKER_BUY_RATIO_MIN: continue
 
                 last_times = sent.get("last_times", {})
                 last_ts = last_times.get(sym)
@@ -477,8 +493,7 @@ def auto_whales_worker():
                 sent["count"]["n"] += 1
                 write_json(AUTO_WHALES_SENT_FILE, sent)
 
-                if sent["count"]["n"] >= MAX_AUTO_WHALES_PER_DAY:
-                    break
+                if sent["count"]["n"] >= MAX_AUTO_WHALES_PER_DAY: break
         except Exception as e:
             send_telegram(f"⚠️ Auto-Whales error: {e}")
         time.sleep(AUTO_WHALES_POLL_SEC)
@@ -490,25 +505,18 @@ def momentum_pulse_worker():
             today = _date_kw()
             if sent.get("count", {}).get("date") != today:
                 sent["count"] = {"date": today, "n": 0}
-
             if sent["count"]["n"] >= MAX_MOM_PER_DAY:
-                time.sleep(MOM_POLL_SEC)
-                continue
+                time.sleep(MOM_POLL_SEC); continue
 
             for sym in get_top_usdt_symbols():
                 df = compute_indicators(get_klines(sym, INTERVAL, LIMIT))
-                if df.empty or len(df) < 60:
-                    continue
+                if df.empty or len(df) < 60: continue
                 last, prev = df.iloc[-1], df.iloc[-2]
 
-                if not (last["close"] > last["ema50"]):
-                    continue
-                if not (last["rsi"] >= MOM_RSI_MIN):
-                    continue
-                if not (last["macd_hist"] > 0 and last["macd_hist"] > prev["macd_hist"]):
-                    continue
-                if not (last["atr_pct"] >= (MIN_EXPECTED_MOVE_PCT / 2)):
-                    continue
+                if not (last["close"] > last["ema50"]): continue
+                if not (last["rsi"] >= MOM_RSI_MIN): continue
+                if not (last["macd_hist"] > 0 and last["macd_hist"] > prev["macd_hist"]): continue
+                if not (last["atr_pct"] >= (MIN_EXPECTED_MOVE_PCT / 2)): continue
 
                 last_times = sent.get("last_times", {})
                 last_ts = last_times.get(sym)
@@ -536,8 +544,7 @@ def momentum_pulse_worker():
                 sent["count"]["n"] += 1
                 write_json(MOM_SENT_FILE, sent)
 
-                if sent["count"]["n"] >= MAX_MOM_PER_DAY:
-                    break
+                if sent["count"]["n"] >= MAX_MOM_PER_DAY: break
         except Exception as e:
             send_telegram(f"⚠️ Momentum error: {e}")
         time.sleep(MOM_POLL_SEC)
