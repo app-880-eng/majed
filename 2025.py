@@ -2,7 +2,7 @@
 # 2025.py — FX Quick Scalper Alerts (Render-ready, FastAPI + Background Task)
 # يعتمد على Yahoo Finance لجلب بيانات الأزواج (بدون مفاتيح API)
 # يرسل تنبيهات شراء/بيع إلى تيليجرام عند تحقق الشروط
-
+print(">>> RUNNING 2025.py v3 at build:", __file__, flush=True)
 import os, time, threading, datetime as dt
 from typing import Dict, Optional, Tuple, List
 import pandas as pd
