@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # Forex Scalper (Paper Trading) — EMA20/EMA50 + RSI(14) + ATR(14)
 # Runs on Render (FastAPI) + background loop every 5 minutes
-# Optional Telegram alerts via env TELEGRAM_TOKEN / TELEGRAM_CHAT_ID
+# Telegram alerts enabled with fixed token/chat_id
 
 import os, time, threading, json, math
 from datetime import datetime, timedelta, timezone, date
@@ -30,18 +30,19 @@ ATR_SL_BUFFER = 0.5
 BREAKOUT_LOOKBACK = 10   # كسر قمة/قاع صغيرة
 START_EQUITY = 10000.0
 
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
+# -------- Telegram fixed --------
+TELEGRAM_TOKEN = "8295831234:AAHgdvWal7E_5_hsjPmbPiIEra4LBDRjbgU"
+TELEGRAM_CHAT_ID = "1820224574"
 
-# -------- State (kept in memory + file) --------
+# -------- State --------
 STATE_FILE = "state.json"
 state = {
     "equity": START_EQUITY,
     "day": str(date.today()),
     "day_start_equity": START_EQUITY,
     "trades_today": 0,
-    "open_positions": {},   # key: pair -> dict
-    "log": []               # recent events
+    "open_positions": {},
+    "log": []
 }
 
 def load_state():
@@ -71,8 +72,6 @@ def log(msg):
     save_state()
 
 def send_telegram(text: str):
-    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
-        return
     import requests
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
@@ -132,7 +131,7 @@ def sell_signal(df: pd.DataFrame) -> bool:
     recent_low = df["Low"].iloc[-(BREAKOUT_LOOKBACK+1):-1].min()
     return prev.Close < recent_low
 
-# -------- Paper Trading Engine --------
+# -------- Paper Trading --------
 def reset_day_if_needed():
     today = str(date.today())
     if state["day"] != today:
@@ -148,12 +147,10 @@ def daily_limits_ok() -> bool:
     return dd > MAX_DAILY_DD
 
 def position_size(entry: float, sl: float) -> float:
-    # risk money
     risk_money = state["equity"] * RISK_PER_TRADE
     dist = abs(entry - sl)
     if dist <= 0:
         return 0.0
-    # "units" as money risk / price distance (simplified, not broker lots)
     units = risk_money / dist
     return units
 
@@ -186,13 +183,10 @@ def evaluate_pair(pair: str):
     if df.empty or len(df) < max(EMA_SLOW, RSI_PERIOD, ATR_PERIOD) + BREAKOUT_LOOKBACK + 5:
         return
 
-    # manage open position first
     pos = state["open_positions"].get(pair)
-    last = df.iloc[-1]
-    price = last.Close
+    price = df.iloc[-1].Close
 
     if pos:
-        # check SL/TP touch with close price (simplified)
         if (pos["side"] == "BUY" and (price <= pos["sl"] or price >= pos["tp"])):
             reason = "TP" if price >= pos["tp"] else "SL"
             close_trade(pair, price, reason)
@@ -201,11 +195,9 @@ def evaluate_pair(pair: str):
             close_trade(pair, price, reason)
         return
 
-    # if no position — can we open new one?
     if not daily_limits_ok():
         return
 
-    # signals are checked on previous candle close (df.iloc[-2])
     if buy_signal(df):
         atr_val = df["ATR"].iloc[-1]
         entry = df["Close"].iloc[-1]
@@ -222,7 +214,7 @@ def evaluate_pair(pair: str):
         tp = entry - (sl - entry) * RR
         open_trade(pair, "SELL", entry, sl, tp)
 
-# -------- Scheduler Loop --------
+# -------- Scheduler --------
 def loop():
     load_state()
     log("PaperTrader started.")
@@ -234,7 +226,7 @@ def loop():
         except Exception as e:
             log(f"Loop error: {e}")
         save_state()
-        time.sleep(300)  # كل 5 دقائق
+        time.sleep(300)
 
 # -------- FastAPI --------
 app = FastAPI()
@@ -254,6 +246,5 @@ def root() -> Dict[str, Any]:
 def signals():
     return {"open_positions": state["open_positions"], "log": state["log"][-50:]}
 
-# start background thread
 t = threading.Thread(target=loop, daemon=True)
 t.start()
