@@ -1,0 +1,15 @@
+services:
+  - type: worker
+    name: forex-reco
+    runtime: python
+    region: oregon
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python 2025.py
+    envVars:
+      - key: PAIRS
+        value: "EURUSD,GBPUSD,USDJPY,XAUUSD"
+      - key: CHECK_EVERY_MIN
+        value: "30"
+      - key: COOLDOWN_HOURS
+        value: "12"
